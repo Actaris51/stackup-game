@@ -36,6 +36,11 @@ yarn-error.*
 # Google Cloud service account credentials — used by EAS submit, NEVER commit
 google-service-account.json
 
+# Build artifacts — produced by EAS, should not live in git
+*.aab
+*.apk
+*.ipa
+
 # typescript
 *.tsbuildinfo
 
