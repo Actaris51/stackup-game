@@ -1,20 +1,26 @@
+import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { HomeScreen } from './src/screens/HomeScreen';
+import { GameScreen } from './src/screens/GameScreen';
+import { initializeAds } from './src/utils/ads';
+
+type Screen = 'home' | 'game';
 
 export default function App() {
+  const [screen, setScreen] = useState<Screen>('home');
+
+  useEffect(() => {
+    initializeAds();
+  }, []);
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <>
+      <StatusBar style="light" />
+      {screen === 'home' ? (
+        <HomeScreen onPlay={() => setScreen('game')} />
+      ) : (
+        <GameScreen onHome={() => setScreen('home')} />
+      )}
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
