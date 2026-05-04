@@ -43,11 +43,14 @@ public class StackUpGameCenterModule: Module {
         }
 
         let local = GKLocalPlayer.local
-        promise.resolve([
+        var result: [String: Any] = [
           "authenticated": local.isAuthenticated,
-          "playerId": local.isAuthenticated ? local.gamePlayerID : NSNull(),
-          "displayName": local.isAuthenticated ? local.displayName : NSNull(),
-        ])
+        ]
+        if local.isAuthenticated {
+          result["playerId"] = local.gamePlayerID
+          result["displayName"] = local.displayName
+        }
+        promise.resolve(result)
       }
     }
 
