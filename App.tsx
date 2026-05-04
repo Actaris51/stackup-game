@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { GameScreen } from './src/screens/GameScreen';
 import { initializeAds } from './src/utils/ads';
+import { authenticate as authenticateGameCenter } from './src/utils/gameCenter';
 
 type Screen = 'home' | 'game';
 
@@ -11,6 +12,8 @@ export default function App() {
 
   useEffect(() => {
     initializeAds();
+    // Silent best-effort — never blocks UX
+    authenticateGameCenter();
   }, []);
 
   return (

@@ -1,0 +1,7 @@
+{
+  "name": "game-center",
+  "version": "0.1.0",
+  "description": "Local Expo module wrapping Apple Game Center for StackUp.",
+  "main": "index.ts",
+  "private": true
+}

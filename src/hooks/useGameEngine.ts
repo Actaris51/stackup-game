@@ -20,6 +20,10 @@ export interface GameData {
   state: GameState;
   score: number;
   perfectStreak: number;
+  /** Highest perfectStreak reached during this game (for achievements). */
+  maxPerfectStreak: number;
+  /** Total blocks added during this game (for cumulative leaderboard). */
+  blocksPlacedThisGame: number;
   stackedBlocks: StackedBlock[];
   movingBlock: { x: number; width: number; color: string; direction: 1 | -1 };
   speed: number;
@@ -44,6 +48,8 @@ export function useGameEngine() {
       state: 'idle',
       score: 0,
       perfectStreak: 0,
+      maxPerfectStreak: 0,
+      blocksPlacedThisGame: 0,
       stackedBlocks: [firstBlock],
       movingBlock: {
         x: 0,
@@ -143,6 +149,7 @@ export function useGameEngine() {
       }
 
       const newPerfectStreak = isPerfect ? prev.perfectStreak + 1 : 0;
+      const newMaxPerfectStreak = Math.max(prev.maxPerfectStreak, newPerfectStreak);
       const scoreBonus = isPerfect ? 3 + newPerfectStreak : 1;
       const newScore = prev.score + scoreBonus;
       const blockIndex = prev.stackedBlocks.length + 1;
@@ -155,6 +162,8 @@ export function useGameEngine() {
         ...prev,
         score: newScore,
         perfectStreak: newPerfectStreak,
+        maxPerfectStreak: newMaxPerfectStreak,
+        blocksPlacedThisGame: prev.blocksPlacedThisGame + 1,
         isPerfect,
         lastCutPiece: cutPiece,
         lastScoreGain: scoreBonus,

@@ -19,7 +19,13 @@ import { ScorePopup } from '../components/ScorePopup';
 import { TapToStart } from '../components/TapToStart';
 import { COLORS, GAME } from '../constants';
 import { showInterstitial, showRewarded, AD_CONFIG } from '../utils/ads';
-import { incrementGamesPlayed } from '../utils/storage';
+import {
+  incrementGamesPlayed,
+  addBlocksToTotal,
+  updateMaxPerfectStreak,
+  getMaxPerfectStreak,
+} from '../utils/storage';
+import { submitGameOverScores, processAchievements } from '../utils/gameCenter';
 import {
   playPlaceSound,
   playPerfectSound,
@@ -69,7 +75,7 @@ export function GameScreen({ onHome }: GameScreenProps) {
   const prevStateRef = useRef(gameData.state);
   const prevScoreRef = useRef(gameData.score);
 
-  // Detect game over for shake + sound
+  // Detect game over for shake + sound + Game Center submission
   useEffect(() => {
     if (prevStateRef.current === 'playing' && gameData.state === 'gameOver') {
       playGameOverSound();
@@ -84,6 +90,28 @@ export function GameScreen({ onHome }: GameScreenProps) {
         Animated.timing(shakeX, { toValue: 4, duration: 50, useNativeDriver: true }),
         Animated.timing(shakeX, { toValue: 0, duration: 50, useNativeDriver: true }),
       ]).start();
+
+      // Game Center: submit scores + check achievements (fire-and-forget; safe on Android/web)
+      const finalScore = gameData.score;
+      const blocksPlaced = gameData.blocksPlacedThisGame;
+      const maxStreakInGame = gameData.maxPerfectStreak;
+      (async () => {
+        try {
+          const gamesPlayed = await incrementGamesPlayed();
+          const totalBlocks = await addBlocksToTotal(blocksPlaced);
+          await updateMaxPerfectStreak(maxStreakInGame);
+
+          await submitGameOverScores({ finalScore, totalBlocks });
+          await processAchievements({
+            finalScore,
+            maxPerfectStreakInGame: maxStreakInGame,
+            gamesPlayed,
+            totalBlocks,
+          });
+        } catch (e) {
+          console.log('[GameOver] post-game stats failed', e);
+        }
+      })();
     }
     prevStateRef.current = gameData.state;
   }, [gameData.state]);
@@ -158,7 +186,11 @@ export function GameScreen({ onHome }: GameScreenProps) {
   }, [started, gameData.state, startGame, tap]);
 
   const handleRestart = useCallback(async () => {
-    const gamesPlayed = await incrementGamesPlayed();
+    // Note: incrementGamesPlayed + Game Center submission already happened in
+    // the game-over useEffect above. Here we just decide whether to show an
+    // interstitial based on the games-played count.
+    const { getGamesPlayed } = await import('../utils/storage');
+    const gamesPlayed = await getGamesPlayed();
     if (gamesPlayed % AD_CONFIG.INTERSTITIAL_FREQUENCY === 0) {
       await showInterstitial();
     }

@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { COLORS } from '../constants';
 import { getHighScore } from '../utils/storage';
+import {
+  isGameCenterAvailable,
+  showGameCenter,
+} from '../utils/gameCenter';
 
 interface HomeScreenProps {
   onPlay: () => void;
@@ -9,9 +13,11 @@ interface HomeScreenProps {
 
 export function HomeScreen({ onPlay }: HomeScreenProps) {
   const [highScore, setHighScore] = useState(0);
+  const [showGameCenterButton, setShowGameCenterButton] = useState(false);
 
   useEffect(() => {
     getHighScore().then(setHighScore);
+    setShowGameCenterButton(isGameCenterAvailable());
   }, []);
 
   return (
@@ -32,6 +38,18 @@ export function HomeScreen({ onPlay }: HomeScreenProps) {
           <Text style={styles.highScoreLabel}>BEST SCORE</Text>
           <Text style={styles.highScoreValue}>{highScore}</Text>
         </View>
+      )}
+
+      {showGameCenterButton && (
+        <TouchableOpacity
+          style={styles.gameCenterButton}
+          onPress={() => {
+            showGameCenter();
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.gameCenterButtonText}>🏆 CLASSEMENTS</Text>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -98,5 +116,19 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: COLORS.text,
     marginTop: 4,
+  },
+  gameCenterButton: {
+    marginTop: 32,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.textSecondary,
+  },
+  gameCenterButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    letterSpacing: 2,
   },
 });
