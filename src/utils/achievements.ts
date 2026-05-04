@@ -5,9 +5,15 @@
 // rename the achievement. Apple identifies the achievement by id, not name.
 
 export const LEADERBOARDS = {
+  // v1.0 — best score in Classic mode (kept under the original id for
+  // backward compatibility with v1.0 entries already published to ASC).
   BEST_SCORE: 'STACKUP_BEST_SCORE',
   DAILY_BEST: 'STACKUP_DAILY_BEST',
   TOTAL_BLOCKS: 'STACKUP_TOTAL_BLOCKS',
+  // v1.1 — per-difficulty leaderboards. Chill/Zen do not submit (see
+  // constants/difficulties.ts hasLeaderboard flag).
+  BEST_HARD: 'STACKUP_BEST_HARD',
+  BEST_INSANE: 'STACKUP_BEST_INSANE',
 } as const;
 
 export type LeaderboardId = (typeof LEADERBOARDS)[keyof typeof LEADERBOARDS];
@@ -17,12 +23,17 @@ export const ACHIEVEMENTS = {
   SCORE_25: 'STACKUP_SCORE_25',
   SCORE_50: 'STACKUP_SCORE_50',
   SCORE_100: 'STACKUP_SCORE_100',
+  // v1.1 elite tier — gates Galaxy theme.
+  SCORE_150: 'STACKUP_SCORE_150',
   PERFECT_5: 'STACKUP_PERFECT_5',
   PERFECT_10: 'STACKUP_PERFECT_10',
   PLAYS_10: 'STACKUP_PLAYS_10',
   PLAYS_100: 'STACKUP_PLAYS_100',
   TOTAL_500: 'STACKUP_TOTAL_500',
   TOTAL_2500: 'STACKUP_TOTAL_2500',
+  // v1.1 mode-mastery achievements (separate Hard/Insane progression).
+  HARD_50: 'STACKUP_HARD_50',
+  INSANE_25: 'STACKUP_INSANE_25',
 } as const;
 
 export type AchievementId = (typeof ACHIEVEMENTS)[keyof typeof ACHIEVEMENTS];
@@ -33,6 +44,18 @@ export const SCORE_ACHIEVEMENTS: { id: AchievementId; threshold: number }[] = [
   { id: ACHIEVEMENTS.SCORE_25, threshold: 25 },
   { id: ACHIEVEMENTS.SCORE_50, threshold: 50 },
   { id: ACHIEVEMENTS.SCORE_100, threshold: 100 },
+  { id: ACHIEVEMENTS.SCORE_150, threshold: 150 },
+];
+
+// Mode-specific one-shot thresholds. Triggered only when the current game's
+// difficulty matches the mode tag.
+export const MODE_SCORE_ACHIEVEMENTS: {
+  id: AchievementId;
+  mode: 'hard' | 'insane';
+  threshold: number;
+}[] = [
+  { id: ACHIEVEMENTS.HARD_50, mode: 'hard', threshold: 50 },
+  { id: ACHIEVEMENTS.INSANE_25, mode: 'insane', threshold: 25 },
 ];
 
 // Perfect-streak one-shots: unlocked when streak reaches threshold in a single game.

@@ -83,6 +83,7 @@ let AdEventType: any = null;
 let RewardedAdEventType: any = null;
 let mobileAds: any = null;
 let MaxAdContentRating: any = null;
+let AdsConsent: any = null;
 
 if (isNative) {
   try {
@@ -93,6 +94,8 @@ if (isNative) {
     RewardedAdEventType = RNMA.RewardedAdEventType;
     mobileAds = RNMA.default;
     MaxAdContentRating = RNMA.MaxAdContentRating;
+    // UMP / Google Funding Choices — required for EU GDPR consent.
+    AdsConsent = RNMA.AdsConsent;
   } catch {}
 }
 
@@ -115,6 +118,27 @@ export async function initializeAds(): Promise<void> {
         }
       } catch (e) {
         console.log('[Ads] ATT request failed', e);
+      }
+    }
+
+    // UMP consent flow (Google Funding Choices). Mandatory for EU users —
+    // without it AdMob can only serve non-personalized ads (lower revenue).
+    // Outside the EU `gatherConsent` is a no-op that returns canRequestAds=true.
+    // Failure is non-fatal: SDK init proceeds with default (non-personalized) ads.
+    if (AdsConsent) {
+      try {
+        if (typeof AdsConsent.gatherConsent === 'function') {
+          const result = await AdsConsent.gatherConsent();
+          console.log('[Ads] UMP gatherConsent', result);
+        } else {
+          // Fallback for older versions: request info + show form if required.
+          const info = await AdsConsent.requestInfoUpdate();
+          if (info?.isConsentFormAvailable) {
+            await AdsConsent.loadAndShowConsentFormIfRequired?.();
+          }
+        }
+      } catch (e) {
+        console.log('[Ads] UMP consent flow failed (non-fatal)', e);
       }
     }
 

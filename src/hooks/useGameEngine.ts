@@ -1,5 +1,15 @@
-import { useCallback, useRef, useState } from 'react';
-import { GAME, getBlockColor } from '../constants';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  DEFAULT_DIFFICULTY_ID,
+  DEFAULT_THEME_ID,
+  GAME,
+  getBlockColor,
+  getBlockColorFromTheme,
+  getDifficulty,
+  getTheme,
+  type Difficulty,
+  type Theme,
+} from '../constants';
 
 export type GameState = 'idle' | 'playing' | 'gameOver';
 
@@ -32,37 +42,37 @@ export interface GameData {
   lastScoreGain: number;
 }
 
-export function useGameEngine() {
-  const [gameData, setGameData] = useState<GameData>(createInitialState());
+export interface UseGameEngineOptions {
+  difficulty?: Difficulty;
+  theme?: Theme;
+}
+
+export function useGameEngine(opts?: UseGameEngineOptions) {
+  // Resolve effective difficulty + theme (defaults preserve v1.0 behaviour).
+  const difficulty = opts?.difficulty ?? getDifficulty(DEFAULT_DIFFICULTY_ID);
+  const theme = opts?.theme ?? getTheme(DEFAULT_THEME_ID);
+
+  // Store live params in refs so the inner setGameData callbacks always see
+  // the current values without forcing the engine to re-create on each prop
+  // change. (We snapshot at startGame() time anyway.)
+  const difficultyRef = useRef<Difficulty>(difficulty);
+  const themeRef = useRef<Theme>(theme);
+  difficultyRef.current = difficulty;
+  themeRef.current = theme;
+
+  const [gameData, setGameData] = useState<GameData>(() => createInitialState(difficulty, theme));
   const animFrameRef = useRef<number | null>(null);
   const gameDataRef = useRef<GameData>(gameData);
   gameDataRef.current = gameData;
 
-  function createInitialState(): GameData {
-    const firstBlock: StackedBlock = {
-      x: (GAME.SCREEN_WIDTH - GAME.INITIAL_BLOCK_WIDTH) / 2,
-      width: GAME.INITIAL_BLOCK_WIDTH,
-      color: getBlockColor(0),
-    };
-    return {
-      state: 'idle',
-      score: 0,
-      perfectStreak: 0,
-      maxPerfectStreak: 0,
-      blocksPlacedThisGame: 0,
-      stackedBlocks: [firstBlock],
-      movingBlock: {
-        x: 0,
-        width: GAME.INITIAL_BLOCK_WIDTH,
-        color: getBlockColor(1),
-        direction: 1,
-      },
-      speed: GAME.INITIAL_SPEED,
-      isPerfect: false,
-      lastCutPiece: null,
-      lastScoreGain: 0,
-    };
-  }
+  // Keep idle state in sync with the picked theme/difficulty so the home
+  // screen / preview reflects the selection without requiring a tap.
+  useEffect(() => {
+    setGameData((prev) => {
+      if (prev.state !== 'idle') return prev; // never tweak an in-progress game
+      return createInitialState(difficulty, theme);
+    });
+  }, [difficulty.id, theme.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const gameLoop = useCallback(() => {
     setGameData((prev) => {
@@ -92,7 +102,7 @@ export function useGameEngine() {
   }, []);
 
   const startGame = useCallback(() => {
-    const initial = createInitialState();
+    const initial = createInitialState(difficultyRef.current, themeRef.current);
     initial.state = 'playing';
     setGameData(initial);
     animFrameRef.current = requestAnimationFrame(gameLoop);
@@ -102,6 +112,9 @@ export function useGameEngine() {
     setGameData((prev) => {
       if (prev.state !== 'playing') return prev;
 
+      const diff = difficultyRef.current;
+      const thm = themeRef.current;
+
       const topBlock = prev.stackedBlocks[prev.stackedBlocks.length - 1];
       const moving = prev.movingBlock;
 
@@ -110,15 +123,19 @@ export function useGameEngine() {
       const overlapEnd = Math.min(topBlock.x + topBlock.width, moving.x + moving.width);
       const overlapWidth = overlapEnd - overlapStart;
 
-      // Miss — game over
+      // Miss (no overlap)
       if (overlapWidth <= 0) {
+        if (!diff.canGameOver) {
+          // Zen mode: ignore the bad tap, keep playing.
+          return prev;
+        }
         if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         return { ...prev, state: 'gameOver' as GameState, lastCutPiece: null, lastScoreGain: 0 };
       }
 
       // Check if perfect
       const offset = Math.abs(topBlock.x - moving.x);
-      const isPerfect = offset <= GAME.PERFECT_TOLERANCE;
+      const isPerfect = offset <= diff.perfectTolerance;
 
       let newBlock: StackedBlock;
       let newWidth: number;
@@ -142,10 +159,15 @@ export function useGameEngine() {
         }
       }
 
-      // Game over if block too small
+      // Game over if block too small (Zen mode clamps to MIN instead).
       if (newWidth < GAME.MIN_BLOCK_WIDTH) {
-        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-        return { ...prev, state: 'gameOver' as GameState, lastCutPiece: null, lastScoreGain: 0 };
+        if (!diff.canGameOver) {
+          newWidth = GAME.MIN_BLOCK_WIDTH;
+          newBlock = { ...newBlock, width: newWidth };
+        } else {
+          if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+          return { ...prev, state: 'gameOver' as GameState, lastCutPiece: null, lastScoreGain: 0 };
+        }
       }
 
       const newPerfectStreak = isPerfect ? prev.perfectStreak + 1 : 0;
@@ -153,10 +175,7 @@ export function useGameEngine() {
       const scoreBonus = isPerfect ? 3 + newPerfectStreak : 1;
       const newScore = prev.score + scoreBonus;
       const blockIndex = prev.stackedBlocks.length + 1;
-      const newSpeed = Math.min(
-        GAME.MAX_SPEED,
-        GAME.INITIAL_SPEED + prev.stackedBlocks.length * GAME.SPEED_INCREMENT
-      );
+      const newSpeed = computeSpeed(diff, prev.stackedBlocks.length);
 
       return {
         ...prev,
@@ -171,7 +190,7 @@ export function useGameEngine() {
         movingBlock: {
           x: 0,
           width: newWidth,
-          color: getBlockColor(blockIndex),
+          color: getBlockColorFromTheme(thm, blockIndex),
           direction: 1 as const,
         },
         speed: newSpeed,
@@ -181,12 +200,13 @@ export function useGameEngine() {
 
   const reset = useCallback(() => {
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    setGameData(createInitialState());
+    setGameData(createInitialState(difficultyRef.current, themeRef.current));
   }, []);
 
   const continueGame = useCallback(() => {
     setGameData((prev) => {
       if (prev.state !== 'gameOver') return prev;
+      const thm = themeRef.current;
       const topBlock = prev.stackedBlocks[prev.stackedBlocks.length - 1];
       return {
         ...prev,
@@ -194,7 +214,7 @@ export function useGameEngine() {
         movingBlock: {
           x: 0,
           width: Math.max(topBlock.width, GAME.INITIAL_BLOCK_WIDTH * 0.3),
-          color: getBlockColor(prev.stackedBlocks.length),
+          color: getBlockColorFromTheme(thm, prev.stackedBlocks.length),
           direction: 1 as const,
         },
       };
@@ -204,3 +224,47 @@ export function useGameEngine() {
 
   return { gameData, startGame, tap, reset, continueGame };
 }
+
+// --- helpers ---
+
+function initialBlockWidth(diff: Difficulty): number {
+  return GAME.INITIAL_BLOCK_WIDTH * diff.initialBlockWidthMul;
+}
+
+function computeSpeed(diff: Difficulty, stackLength: number): number {
+  const initial = GAME.INITIAL_SPEED * diff.initialSpeedMul;
+  const incr = GAME.SPEED_INCREMENT * diff.speedIncrementMul;
+  const max = GAME.MAX_SPEED * diff.maxSpeedMul;
+  return Math.min(max, initial + stackLength * incr);
+}
+
+function createInitialState(diff: Difficulty, thm: Theme): GameData {
+  const baseWidth = initialBlockWidth(diff);
+  const firstBlock: StackedBlock = {
+    x: (GAME.SCREEN_WIDTH - baseWidth) / 2,
+    width: baseWidth,
+    color: getBlockColorFromTheme(thm, 0),
+  };
+  return {
+    state: 'idle',
+    score: 0,
+    perfectStreak: 0,
+    maxPerfectStreak: 0,
+    blocksPlacedThisGame: 0,
+    stackedBlocks: [firstBlock],
+    movingBlock: {
+      x: 0,
+      width: baseWidth,
+      color: getBlockColorFromTheme(thm, 1),
+      direction: 1,
+    },
+    speed: GAME.INITIAL_SPEED * diff.initialSpeedMul,
+    isPerfect: false,
+    lastCutPiece: null,
+    lastScoreGain: 0,
+  };
+}
+
+// Re-exported for convenience: the legacy getBlockColor still works for any
+// caller that doesn't care about themes.
+export { getBlockColor };

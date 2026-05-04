@@ -1,56 +1,102 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { COLORS } from '../constants';
-import { getHighScore } from '../utils/storage';
-import {
-  isGameCenterAvailable,
-  showGameCenter,
-} from '../utils/gameCenter';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { COLORS, type Difficulty, type Theme } from '../constants';
+import { getHighScoreForMode } from '../utils/storage';
+import { isGameCenterAvailable, showGameCenter } from '../utils/gameCenter';
 
 interface HomeScreenProps {
+  theme: Theme;
+  difficulty: Difficulty;
   onPlay: () => void;
+  onCustomize: () => void;
 }
 
-export function HomeScreen({ onPlay }: HomeScreenProps) {
-  const [highScore, setHighScore] = useState(0);
+export function HomeScreen({
+  theme,
+  difficulty,
+  onPlay,
+  onCustomize,
+}: HomeScreenProps) {
+  const [modeBest, setModeBest] = useState(0);
   const [showGameCenterButton, setShowGameCenterButton] = useState(false);
 
   useEffect(() => {
-    getHighScore().then(setHighScore);
+    getHighScoreForMode(difficulty.id).then(setModeBest).catch(() => {});
     setShowGameCenterButton(isGameCenterAvailable());
-  }, []);
+  }, [difficulty.id]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.titleContainer}>
-        <Text style={styles.title}>STACK</Text>
-        <Text style={styles.titleAccent}>UP</Text>
+        <Text style={[styles.title, { color: theme.text }]}>STACK</Text>
+        <Text style={[styles.titleAccent, { color: theme.accent }]}>UP</Text>
       </View>
 
-      <Text style={styles.subtitle}>Tap to stack. Don't miss.</Text>
+      <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+        Tap to stack. Don't miss.
+      </Text>
 
-      <TouchableOpacity style={styles.playButton} onPress={onPlay} activeOpacity={0.8}>
-        <Text style={styles.playText}>PLAY</Text>
+      {/* Active mode chip — small but visible above the PLAY button */}
+      <TouchableOpacity
+        onPress={onCustomize}
+        activeOpacity={0.7}
+        style={[styles.modeChip, { borderColor: theme.accent }]}
+      >
+        <Text style={[styles.modeChipLabel, { color: theme.textSecondary }]}>
+          MODE
+        </Text>
+        <Text style={[styles.modeChipValue, { color: theme.accent }]}>
+          {difficulty.name.toUpperCase()}
+        </Text>
       </TouchableOpacity>
 
-      {highScore > 0 && (
+      <TouchableOpacity
+        style={[
+          styles.playButton,
+          { backgroundColor: theme.accent, shadowColor: theme.accent },
+        ]}
+        onPress={onPlay}
+        activeOpacity={0.8}
+      >
+        <Text style={[styles.playText, { color: COLORS.buttonText }]}>PLAY</Text>
+      </TouchableOpacity>
+
+      {modeBest > 0 && (
         <View style={styles.highScoreContainer}>
-          <Text style={styles.highScoreLabel}>BEST SCORE</Text>
-          <Text style={styles.highScoreValue}>{highScore}</Text>
+          <Text style={[styles.highScoreLabel, { color: theme.textSecondary }]}>
+            BEST ({difficulty.nameEN.toUpperCase()})
+          </Text>
+          <Text style={[styles.highScoreValue, { color: theme.text }]}>
+            {modeBest}
+          </Text>
         </View>
       )}
 
-      {showGameCenterButton && (
+      <View style={styles.bottomActions}>
         <TouchableOpacity
-          style={styles.gameCenterButton}
-          onPress={() => {
-            showGameCenter();
-          }}
+          onPress={onCustomize}
           activeOpacity={0.7}
+          style={[styles.secondaryButton, { borderColor: theme.textSecondary }]}
         >
-          <Text style={styles.gameCenterButtonText}>🏆 CLASSEMENTS</Text>
+          <Text style={[styles.secondaryButtonText, { color: theme.textSecondary }]}>
+            🎨 PERSONNALISER
+          </Text>
         </TouchableOpacity>
-      )}
+
+        {showGameCenterButton && (
+          <TouchableOpacity
+            style={[styles.secondaryButton, { borderColor: theme.textSecondary }]}
+            onPress={() => {
+              showGameCenter();
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.secondaryButtonText, { color: theme.textSecondary }]}>
+              🏆 CLASSEMENTS
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
@@ -58,7 +104,6 @@ export function HomeScreen({ onPlay }: HomeScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
@@ -70,27 +115,42 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 64,
     fontWeight: '900',
-    color: COLORS.text,
     letterSpacing: 8,
   },
   titleAccent: {
     fontSize: 64,
     fontWeight: '900',
-    color: COLORS.accent,
     letterSpacing: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: COLORS.textSecondary,
-    marginBottom: 60,
+    marginBottom: 30,
+    letterSpacing: 2,
+  },
+  modeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    marginBottom: 28,
+  },
+  modeChipLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  modeChipValue: {
+    fontSize: 12,
+    fontWeight: '900',
     letterSpacing: 2,
   },
   playButton: {
-    backgroundColor: COLORS.accent,
     paddingHorizontal: 60,
     paddingVertical: 20,
     borderRadius: 40,
-    shadowColor: COLORS.accent,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 12,
@@ -99,36 +159,36 @@ const styles = StyleSheet.create({
   playText: {
     fontSize: 24,
     fontWeight: '900',
-    color: COLORS.buttonText,
     letterSpacing: 6,
   },
   highScoreContainer: {
-    marginTop: 50,
+    marginTop: 36,
     alignItems: 'center',
   },
   highScoreLabel: {
     fontSize: 12,
-    color: COLORS.textSecondary,
     letterSpacing: 3,
   },
   highScoreValue: {
     fontSize: 36,
     fontWeight: '900',
-    color: COLORS.text,
     marginTop: 4,
   },
-  gameCenterButton: {
-    marginTop: 32,
+  bottomActions: {
+    marginTop: 40,
+    gap: 12,
+    width: '100%',
+    alignItems: 'center',
+  },
+  secondaryButton: {
     paddingHorizontal: 22,
     paddingVertical: 12,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: COLORS.textSecondary,
   },
-  gameCenterButtonText: {
+  secondaryButtonText: {
     fontSize: 13,
     fontWeight: '700',
-    color: COLORS.textSecondary,
     letterSpacing: 2,
   },
 });

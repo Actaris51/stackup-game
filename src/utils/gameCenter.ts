@@ -9,11 +9,13 @@
 // is never blocked on Game Center.
 
 import { Platform } from 'react-native';
+import { getDifficulty, type DifficultyId } from '../constants';
 import {
   ACHIEVEMENTS,
   AchievementId,
   LEADERBOARDS,
   LeaderboardId,
+  MODE_SCORE_ACHIEVEMENTS,
   PERFECT_ACHIEVEMENTS,
   PROGRESS_ACHIEVEMENTS,
   SCORE_ACHIEVEMENTS,
@@ -97,17 +99,39 @@ async function reportProgress(achievementId: AchievementId, percent: number): Pr
   );
 }
 
+/**
+ * Maps a difficulty mode to its dedicated "best score" leaderboard.
+ * Modes without a leaderboard (chill, zen) are absent on purpose.
+ */
+const MODE_TO_BEST_LEADERBOARD: Partial<Record<DifficultyId, LeaderboardId>> = {
+  classic: LEADERBOARDS.BEST_SCORE, // v1.0 leaderboard kept for Classic
+  hard: LEADERBOARDS.BEST_HARD,
+  insane: LEADERBOARDS.BEST_INSANE,
+};
+
 /** Submit all relevant scores after a game ends. */
 export async function submitGameOverScores(opts: {
   finalScore: number;
   totalBlocks: number;
+  difficulty: DifficultyId;
 }): Promise<void> {
   if (!isAuthenticated) return;
-  await Promise.all([
-    submitScore(LEADERBOARDS.BEST_SCORE, opts.finalScore),
-    submitScore(LEADERBOARDS.DAILY_BEST, opts.finalScore),
-    submitScore(LEADERBOARDS.TOTAL_BLOCKS, opts.totalBlocks),
-  ]);
+
+  const diff = getDifficulty(opts.difficulty);
+  const tasks: Promise<void>[] = [];
+
+  // Total blocks: cumulative across ALL modes (Zen and Chill included).
+  tasks.push(submitScore(LEADERBOARDS.TOTAL_BLOCKS, opts.totalBlocks));
+
+  if (diff.hasLeaderboard) {
+    // Cross-mode daily best (only competitive modes contribute).
+    tasks.push(submitScore(LEADERBOARDS.DAILY_BEST, opts.finalScore));
+    // Per-mode best leaderboard.
+    const board = MODE_TO_BEST_LEADERBOARD[opts.difficulty];
+    if (board) tasks.push(submitScore(board, opts.finalScore));
+  }
+
+  await Promise.all(tasks);
 }
 
 /** Check + unlock achievements based on game results and cumulative stats. */
@@ -116,24 +140,37 @@ export async function processAchievements(opts: {
   maxPerfectStreakInGame: number;
   gamesPlayed: number;
   totalBlocks: number;
+  difficulty: DifficultyId;
 }): Promise<void> {
   if (!isAuthenticated) return;
 
-  // Score milestones (one-shot)
-  for (const a of SCORE_ACHIEVEMENTS) {
-    if (opts.finalScore >= a.threshold) {
+  const diff = getDifficulty(opts.difficulty);
+
+  // Score milestones (one-shot) — only count in competitive modes so Chill
+  // can't farm them.
+  if (diff.hasLeaderboard) {
+    for (const a of SCORE_ACHIEVEMENTS) {
+      if (opts.finalScore >= a.threshold) {
+        await unlockAchievement(a.id);
+      }
+    }
+  }
+
+  // Mode-specific score thresholds (Hard 50, Insane 25).
+  for (const a of MODE_SCORE_ACHIEVEMENTS) {
+    if (opts.difficulty === a.mode && opts.finalScore >= a.threshold) {
       await unlockAchievement(a.id);
     }
   }
 
-  // Perfect streak (one-shot, in-game)
+  // Perfect streak (one-shot, in-game) — fire across all modes including Zen.
   for (const a of PERFECT_ACHIEVEMENTS) {
     if (opts.maxPerfectStreakInGame >= a.threshold) {
       await unlockAchievement(a.id);
     }
   }
 
-  // Progress (incremental %)
+  // Progress (incremental %) — always fire (totals are cumulative, not gamed).
   for (const a of PROGRESS_ACHIEVEMENTS) {
     const value = a.metric === 'gamesPlayed' ? opts.gamesPlayed : opts.totalBlocks;
     const percent = Math.min(100, (value / a.target) * 100);

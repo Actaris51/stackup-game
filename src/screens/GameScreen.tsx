@@ -17,15 +17,28 @@ import { FallingPiece } from '../components/FallingPiece';
 import { PerfectEffect } from '../components/PerfectEffect';
 import { ScorePopup } from '../components/ScorePopup';
 import { TapToStart } from '../components/TapToStart';
-import { COLORS, GAME } from '../constants';
+import { UnlockToast } from '../components/UnlockToast';
+import {
+  GAME,
+  findNewlyUnlocked,
+  type Difficulty,
+  type Theme,
+  type UnlockRule,
+} from '../constants';
 import { showInterstitial, showRewarded, AD_CONFIG } from '../utils/ads';
 import {
-  incrementGamesPlayed,
   addBlocksToTotal,
+  getCompetitiveBestScore,
+  getGamesPlayed,
+  getHighScoreForMode,
+  getSeenUnlocks,
+  getTotalBlocks,
+  incrementGamesPlayed,
+  markUnlocksSeen,
+  setHighScoreForMode,
   updateMaxPerfectStreak,
-  getMaxPerfectStreak,
 } from '../utils/storage';
-import { submitGameOverScores, processAchievements } from '../utils/gameCenter';
+import { processAchievements, submitGameOverScores } from '../utils/gameCenter';
 import {
   playPlaceSound,
   playPerfectSound,
@@ -35,6 +48,8 @@ import {
 
 interface GameScreenProps {
   onHome: () => void;
+  theme: Theme;
+  difficulty: Difficulty;
 }
 
 interface FallingPieceData extends CutPiece {
@@ -60,10 +75,18 @@ interface PerfectEffectData {
 
 let effectIdCounter = 0;
 
-export function GameScreen({ onHome }: GameScreenProps) {
-  const { gameData, startGame, tap, reset, continueGame } = useGameEngine();
+export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
+  const { gameData, startGame, tap, reset, continueGame } = useGameEngine({
+    difficulty,
+    theme,
+  });
   const [hasContinued, setHasContinued] = useState(false);
   const [started, setStarted] = useState(false);
+
+  // Game-over context passed to the modal (filled by the post-game async flow).
+  const [modeBest, setModeBest] = useState(0);
+  const [isNewRecord, setIsNewRecord] = useState(false);
+  const [newlyUnlocked, setNewlyUnlocked] = useState<UnlockRule[]>([]);
 
   // Effects state
   const [fallingPieces, setFallingPieces] = useState<FallingPieceData[]>([]);
@@ -75,7 +98,7 @@ export function GameScreen({ onHome }: GameScreenProps) {
   const prevStateRef = useRef(gameData.state);
   const prevScoreRef = useRef(gameData.score);
 
-  // Detect game over for shake + sound + Game Center submission
+  // Detect game over for shake + sound + Game Center submission + unlocks
   useEffect(() => {
     if (prevStateRef.current === 'playing' && gameData.state === 'gameOver') {
       playGameOverSound();
@@ -91,23 +114,51 @@ export function GameScreen({ onHome }: GameScreenProps) {
         Animated.timing(shakeX, { toValue: 0, duration: 50, useNativeDriver: true }),
       ]).start();
 
-      // Game Center: submit scores + check achievements (fire-and-forget; safe on Android/web)
       const finalScore = gameData.score;
       const blocksPlaced = gameData.blocksPlacedThisGame;
       const maxStreakInGame = gameData.maxPerfectStreak;
+      const modeId = difficulty.id;
+
       (async () => {
         try {
+          // Persist stats
           const gamesPlayed = await incrementGamesPlayed();
           const totalBlocks = await addBlocksToTotal(blocksPlaced);
           await updateMaxPerfectStreak(maxStreakInGame);
 
-          await submitGameOverScores({ finalScore, totalBlocks });
+          // Per-mode high score
+          const { beatModeRecord } = await setHighScoreForMode(modeId, finalScore);
+          const modeBestNow = await getHighScoreForMode(modeId);
+          setModeBest(modeBestNow);
+          setIsNewRecord(beatModeRecord);
+
+          // Game Center
+          await submitGameOverScores({
+            finalScore,
+            totalBlocks,
+            difficulty: modeId,
+          });
           await processAchievements({
             finalScore,
             maxPerfectStreakInGame: maxStreakInGame,
             gamesPlayed,
             totalBlocks,
+            difficulty: modeId,
           });
+
+          // Unlocks (use competitive best, not chill/zen)
+          const competitiveBest = await getCompetitiveBestScore();
+          const seen = await getSeenUnlocks();
+          const newly = findNewlyUnlocked(
+            { bestScore: competitiveBest, totalBlocks, gamesPlayed },
+            seen
+          );
+          if (newly.length > 0) {
+            setNewlyUnlocked(newly);
+            await markUnlocksSeen(newly.map((r) => r.id));
+          } else {
+            setNewlyUnlocked([]);
+          }
         } catch (e) {
           console.log('[GameOver] post-game stats failed', e);
         }
@@ -173,11 +224,21 @@ export function GameScreen({ onHome }: GameScreenProps) {
     prevScoreRef.current = gameData.score;
   }, [gameData.score, gameData.state]);
 
+  // Reset displayed mode best whenever a fresh game starts (cleaner UX).
+  useEffect(() => {
+    if (gameData.state === 'idle') {
+      // Best-effort initial value so the modal next time isn't empty.
+      getHighScoreForMode(difficulty.id).then(setModeBest).catch(() => {});
+    }
+  }, [difficulty.id, gameData.state]);
+
   const handleTap = useCallback(() => {
     if (!started) {
       startGame();
       setStarted(true);
       setHasContinued(false);
+      setNewlyUnlocked([]);
+      setIsNewRecord(false);
       return;
     }
     if (gameData.state === 'playing') {
@@ -189,7 +250,6 @@ export function GameScreen({ onHome }: GameScreenProps) {
     // Note: incrementGamesPlayed + Game Center submission already happened in
     // the game-over useEffect above. Here we just decide whether to show an
     // interstitial based on the games-played count.
-    const { getGamesPlayed } = await import('../utils/storage');
     const gamesPlayed = await getGamesPlayed();
     if (gamesPlayed % AD_CONFIG.INTERSTITIAL_FREQUENCY === 0) {
       await showInterstitial();
@@ -197,6 +257,8 @@ export function GameScreen({ onHome }: GameScreenProps) {
     setFallingPieces([]);
     setScorePopups([]);
     setPerfectEffects([]);
+    setNewlyUnlocked([]);
+    setIsNewRecord(false);
     reset();
     setStarted(false);
     setHasContinued(false);
@@ -222,6 +284,10 @@ export function GameScreen({ onHome }: GameScreenProps) {
     setPerfectEffects((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
+  const handleUnlockToastDismiss = useCallback(() => {
+    setNewlyUnlocked([]);
+  }, []);
+
   const movingBlockY =
     GAME.STACK_AREA_HEIGHT -
     gameData.stackedBlocks.length * GAME.BLOCK_HEIGHT -
@@ -229,7 +295,12 @@ export function GameScreen({ onHome }: GameScreenProps) {
 
   return (
     <TouchableWithoutFeedback onPress={handleTap}>
-      <Animated.View style={[styles.container, { transform: [{ translateX: shakeX }] }]}>
+      <Animated.View
+        style={[
+          styles.container,
+          { backgroundColor: theme.background, transform: [{ translateX: shakeX }] },
+        ]}
+      >
         <StatusBar barStyle="light-content" />
 
         {/* Score */}
@@ -306,10 +377,19 @@ export function GameScreen({ onHome }: GameScreenProps) {
         <GameOverModal
           visible={gameData.state === 'gameOver'}
           score={gameData.score}
+          modeBest={modeBest}
+          isNewRecord={isNewRecord}
+          difficulty={difficulty}
+          theme={theme}
           onRestart={handleRestart}
           onContinue={handleContinue}
           hasContinued={hasContinued}
         />
+
+        {/* Newly unlocked content (themes/modes). Renders above the modal. */}
+        {newlyUnlocked.length > 0 && gameData.state === 'gameOver' && (
+          <UnlockToast unlocks={newlyUnlocked} theme={theme} onDismiss={handleUnlockToastDismiss} />
+        )}
       </Animated.View>
     </TouchableWithoutFeedback>
   );
@@ -318,7 +398,6 @@ export function GameScreen({ onHome }: GameScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
   },
   scoreContainer: {
     position: 'absolute',
