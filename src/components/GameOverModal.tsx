@@ -21,6 +21,8 @@ interface GameOverModalProps {
   hasContinued: boolean;
   onRestart: () => void;
   onContinue: () => void;
+  /** Return to the home screen (for changing mode / theme via Customize). */
+  onHome: () => void;
 }
 
 export function GameOverModal({
@@ -33,6 +35,7 @@ export function GameOverModal({
   hasContinued,
   onRestart,
   onContinue,
+  onHome,
 }: GameOverModalProps) {
   const handleShare = async () => {
     try {
@@ -92,9 +95,18 @@ export function GameOverModal({
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-            <Text style={[styles.shareText, { color: theme.textSecondary }]}>Share Score</Text>
-          </TouchableOpacity>
+          <View style={styles.footerRow}>
+            <TouchableOpacity style={styles.footerButton} onPress={onHome}>
+              <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+                🏠 Menu
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.footerButton} onPress={handleShare}>
+              <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+                Share Score
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -184,12 +196,20 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
-  shareButton: {
-    paddingVertical: 12,
-    marginTop: 4,
+  footerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 24,
+    marginTop: 8,
   },
-  shareText: {
-    fontSize: 16,
+  footerButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  footerText: {
+    fontSize: 15,
+    fontWeight: '600',
     textDecorationLine: 'underline',
   },
 });

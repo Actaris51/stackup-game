@@ -384,6 +384,7 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
           onRestart={handleRestart}
           onContinue={handleContinue}
           hasContinued={hasContinued}
+          onHome={onHome}
         />
 
         {/* Newly unlocked content (themes/modes). Renders above the modal. */}
