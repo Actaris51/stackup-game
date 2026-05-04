@@ -170,17 +170,68 @@ def make_score(target, size=512):
     return img
 
 
+def make_mode_score(mode_label, target, accent_color, size=512):
+    """Mode-specific score icon (HARD, INSANE). Uses a custom accent color
+    instead of the default gold so the achievement reads as a tier above the
+    generic SCORE achievements."""
+    img = base_canvas(size)
+    draw = ImageDraw.Draw(img)
+    # Top label: mode name in colored accent
+    draw_centered_text(
+        draw, mode_label, int(size * 0.09), size,
+        color=accent_color, font_size=int(size * 0.10)
+    )
+    # Big number
+    draw_centered_text(
+        draw, str(target), int(size * 0.25), size,
+        color=TEXT, font_size=int(size * 0.32)
+    )
+    # SCORE sub-label
+    draw_centered_text(
+        draw, "SCORE", int(size * 0.62), size,
+        color=accent_color, font_size=int(size * 0.06)
+    )
+    # Faded blocks tower at the bottom — uses mode-specific palette tint
+    block_h = int(size * 0.07)
+    base_w = int(size * 0.45)
+    cx = size // 2
+    start_y = int(size * 0.95) - block_h
+    for i in range(4):
+        w = int(base_w * (1 - i * 0.18))
+        y = start_y - i * block_h
+        x1 = cx - w // 2
+        x2 = cx + w // 2
+        # Blend accent_color with palette so blocks feel mode-themed
+        color = accent_color + (160,)
+        draw.rounded_rectangle(
+            [x1, y, x2, y + int(block_h * 0.85)],
+            radius=int(block_h * 0.22),
+            fill=color,
+        )
+    return img
+
+
+# Mode accent colors (visually distinct from gold so the tier reads at a glance)
+HARD_ACCENT = (251, 113, 133)    # warm coral/red
+INSANE_ACCENT = (192, 132, 252)  # electric purple
+
+
 ACHIEVEMENTS = [
     ("STACKUP_FIRST_10", lambda: make_score(10)),
     ("STACKUP_SCORE_25", lambda: make_score(25)),
     ("STACKUP_SCORE_50", lambda: make_score(50)),
     ("STACKUP_SCORE_100", lambda: make_score(100)),
+    # v1.1 elite tier (gates Galaxy theme)
+    ("STACKUP_SCORE_150", lambda: make_score(150)),
     ("STACKUP_PERFECT_5", lambda: make_perfect(5)),
     ("STACKUP_PERFECT_10", lambda: make_perfect(10)),
     ("STACKUP_PLAYS_10", lambda: make_plays(10)),
     ("STACKUP_PLAYS_100", lambda: make_plays(100)),
     ("STACKUP_TOTAL_500", lambda: make_total(500)),
     ("STACKUP_TOTAL_2500", lambda: make_total(2500)),
+    # v1.1 mode-specific mastery
+    ("STACKUP_HARD_50", lambda: make_mode_score("HARD", 50, HARD_ACCENT)),
+    ("STACKUP_INSANE_25", lambda: make_mode_score("INSANE", 25, INSANE_ACCENT)),
 ]
 
 
