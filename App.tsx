@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { GameScreen } from './src/screens/GameScreen';
 import { CustomizeScreen } from './src/screens/CustomizeScreen';
-import { initializeAds } from './src/utils/ads';
+import { initializeAds, requestATTPermissionIfNeeded } from './src/utils/ads';
 import { authenticate as authenticateGameCenter } from './src/utils/gameCenter';
 import {
   getActiveDifficulty,
@@ -51,7 +51,12 @@ export default function App() {
       }
       setBootstrapped(true);
 
-      // Side effects — fire-and-forget, never block UX.
+      // Sequencing matters per Apple Guideline 2.1 (rejection on v1.0.1 build 13):
+      // The ATT prompt is silently dropped by iOS if any other system UI
+      // (e.g. Game Center auth banner) is already pending. We MUST await
+      // the ATT request to fully resolve before kicking off Game Center
+      // auth or AdMob init. After ATT, the rest can run in parallel.
+      await requestATTPermissionIfNeeded();
       initializeAds();
       authenticateGameCenter();
     })();

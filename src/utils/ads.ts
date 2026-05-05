@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Application from 'expo-application';
 import * as TrackingTransparency from 'expo-tracking-transparency';
 
@@ -99,6 +99,68 @@ if (isNative) {
   } catch {}
 }
 
+/**
+ * Wait until the app is in `UIApplicationStateActive` before resolving.
+ * Per Apple docs, ATT prompts are silently dropped if the app isn't active.
+ * Returns immediately if already active; gives up after `timeoutMs` to avoid
+ * blocking app startup forever in pathological cases.
+ */
+async function waitForActiveState(timeoutMs = 3000): Promise<void> {
+  if (AppState.currentState === 'active') return;
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      sub.remove();
+      resolve();
+    }, timeoutMs);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        clearTimeout(timeout);
+        sub.remove();
+        resolve();
+      }
+    });
+  });
+}
+
+let attRequested = false;
+
+/**
+ * Request the App Tracking Transparency permission once, with proper
+ * sequencing for iOS 26+. MUST be called BEFORE any other system UI
+ * (Game Center auth, push permission, etc.) — Apple silently drops the
+ * ATT prompt if another permission request or system banner is pending.
+ *
+ * History: v1.0.1 (build 13) was rejected by Apple Review under
+ * Guideline 2.1 because reviewers couldn't see the ATT prompt on
+ * iPadOS 26.4.2. Root cause: `initializeAds()` and `authenticateGameCenter()`
+ * fired in parallel, and Game Center's native UI raced ahead of the ATT
+ * request, blocking it per Apple's "another request pending" rule.
+ *
+ * This helper:
+ *  - awaits `UIApplicationStateActive` before requesting,
+ *  - is idempotent (safe to call multiple times),
+ *  - logs every step so a future review rejection can be diagnosed.
+ */
+export async function requestATTPermissionIfNeeded(): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+  if (attRequested) return;
+  attRequested = true;
+  try {
+    const current = await TrackingTransparency.getTrackingPermissionsAsync();
+    console.log('[Ads] ATT current status:', current.status);
+    if (current.status !== 'undetermined') {
+      // Already granted/denied/restricted — system won't re-prompt.
+      return;
+    }
+    await waitForActiveState();
+    console.log('[Ads] ATT requesting permission, AppState=', AppState.currentState);
+    const result = await TrackingTransparency.requestTrackingPermissionsAsync();
+    console.log('[Ads] ATT request resolved:', result.status);
+  } catch (e) {
+    console.log('[Ads] ATT request failed', e);
+  }
+}
+
 let initPromise: Promise<void> | null = null;
 
 export async function initializeAds(): Promise<void> {
@@ -108,18 +170,9 @@ export async function initializeAds(): Promise<void> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    // iOS: ask for App Tracking Transparency before initializing the SDK so
-    // AdMob knows whether it can serve personalized ads.
-    if (Platform.OS === 'ios') {
-      try {
-        const { status } = await TrackingTransparency.getTrackingPermissionsAsync();
-        if (status === 'undetermined') {
-          await TrackingTransparency.requestTrackingPermissionsAsync();
-        }
-      } catch (e) {
-        console.log('[Ads] ATT request failed', e);
-      }
-    }
+    // ATT must already have been requested by the caller via
+    // requestATTPermissionIfNeeded(). We don't request here to avoid
+    // racing with other system UI (e.g. Game Center auth).
 
     // UMP consent flow (Google Funding Choices). Mandatory for EU users —
     // without it AdMob can only serve non-personalized ads (lower revenue).
