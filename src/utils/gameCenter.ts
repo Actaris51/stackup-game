@@ -33,7 +33,11 @@ interface GameCenterNativeModule {
 
 let nativeModule: GameCenterNativeModule | null = null;
 let isAuthenticated = false;
-let authAttempted = false;
+// In-flight Promise cache so concurrent callers all await the same auth call.
+// Pattern: identical to `initPromise` in ads.ts. Replaces the previous
+// `authAttempted` boolean which had a TOCTOU bug — callers racing while the
+// Swift sign-in modal was still up would short-circuit with stale `false`.
+let authPromise: Promise<boolean> | null = null;
 
 if (Platform.OS === 'ios') {
   try {
@@ -52,21 +56,33 @@ function safeCall<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
   });
 }
 
-/** Attempt silent auth. Safe to call multiple times — only the first triggers a real call. */
+/**
+ * Attempt silent auth. Safe to call multiple times — only the first triggers a
+ * real call to the native module; subsequent (or concurrent) callers `await`
+ * the same in-flight Promise and receive the same resolved value.
+ *
+ * Why not a boolean flag? A `let attempted = false; attempted = true;` flag set
+ * BEFORE the native call creates a TOCTOU race: a second caller arriving while
+ * the Swift sign-in modal is still up sees `attempted=true` and short-circuits
+ * with the stale `isAuthenticated=false`, even though the first call may
+ * eventually succeed. Caching the Promise itself fixes this.
+ */
 export async function authenticate(): Promise<boolean> {
-  if (authAttempted) return isAuthenticated;
-  authAttempted = true;
-
+  if (authPromise) return authPromise;
   if (!nativeModule) return false;
 
-  const result = await safeCall('authenticate', () => nativeModule!.authenticate());
-  isAuthenticated = !!result?.authenticated;
-  if (isAuthenticated) {
-    console.log('[GameCenter] Authenticated as', result?.displayName ?? result?.playerId);
-  } else {
-    console.log('[GameCenter] Not authenticated (user declined or signed out)');
-  }
-  return isAuthenticated;
+  authPromise = (async () => {
+    const result = await safeCall('authenticate', () => nativeModule!.authenticate());
+    isAuthenticated = !!result?.authenticated;
+    if (isAuthenticated) {
+      console.log('[GameCenter] Authenticated as', result?.displayName ?? result?.playerId);
+    } else {
+      console.log('[GameCenter] Not authenticated (user declined or signed out)');
+    }
+    return isAuthenticated;
+  })();
+
+  return authPromise;
 }
 
 export function isGameCenterAvailable(): boolean {
