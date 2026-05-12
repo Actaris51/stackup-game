@@ -1,23 +1,35 @@
 """Generate StackUp marketing screenshots for the App Store.
 
-Output: 6 PNG files at iPhone 6.7" required size (1290 × 2796), portrait.
-Apple accepts these as the only screenshot set since iOS 17 — they cover all
-device sizes via aspect-ratio match.
+Generates 6 PNGs at every size in SIZE_PROFILES (currently 6.5" and 6.7").
+Apple's media manager has separate slots per device size; the existing
+StackUp ASC slot only exposes 6.5" (1284×2778), so that's the one we
+upload — but we keep the 6.7" set as a backup in case Apple ever opens
+that slot for the app.
 
 Run: `python scripts/generate-marketing-screenshots.py`
-Outputs to `assets/marketing/screenshot-1.png` ... `screenshot-6.png`.
+Outputs to:
+  assets/marketing/iphone-6.5/screenshot-1..6.png  (1284 × 2778)
+  assets/marketing/iphone-6.7/screenshot-1..6.png  (1290 × 2796)
 
-Design language: aligns with StackUp icon (dark navy bg + colorful tower) and
-the app's v1.1 themes. Big bold headlines, sub-titles, phone mockup centered.
+Design language: aligns with StackUp icon (dark navy bg + colorful tower)
+and the app's v1.1 themes. Big bold headlines, sub-titles, phone mockup
+centered. All layout uses W/H proportionally so swapping sizes "just works".
 """
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 import os
 import math
 
 # ----------------------------------------------------------------------------
-# Sizing — App Store iPhone 6.7" required dimensions
+# Sizing — declared up-front so screenshot functions can read them via the
+# module globals. The main loop mutates W and H once per profile then
+# re-renders the full set.
 # ----------------------------------------------------------------------------
-W, H = 1290, 2796  # px
+SIZE_PROFILES = {
+    "iphone-6.5": (1284, 2778),  # iPhone 11 Pro Max / Xs Max — what ASC's slot expects
+    "iphone-6.7": (1290, 2796),  # iPhone 14/15/16 Pro Max — backup
+}
+# Default starting size; the main loop overrides this per profile.
+W, H = SIZE_PROFILES["iphone-6.5"]
 
 # ----------------------------------------------------------------------------
 # Palette (matches StackUp icon + Classic theme)
@@ -559,12 +571,20 @@ SCREENSHOTS = [
 
 
 if __name__ == "__main__":
-    out_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "marketing")
-    os.makedirs(out_dir, exist_ok=True)
-    for name, fn in SCREENSHOTS:
-        print(f"Rendering {name}...")
-        img = fn()
-        out_path = os.path.join(out_dir, f"{name}.png")
-        img.save(out_path, "PNG", optimize=True)
-        print(f"  -> {out_path}  ({os.path.getsize(out_path) // 1024} KB)")
+    base_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "marketing")
+    for profile_name, (pw, ph) in SIZE_PROFILES.items():
+        # Mutate the module-level W and H so every screenshot helper picks
+        # up the new size for this iteration. Helpers read W/H as module
+        # globals (no `global` keyword needed for reads), so reassigning
+        # them at module scope is enough.
+        W, H = pw, ph
+        out_dir = os.path.join(base_dir, profile_name)
+        os.makedirs(out_dir, exist_ok=True)
+        print(f"=== Rendering {profile_name} ({pw} x {ph}) ===")
+        for name, fn in SCREENSHOTS:
+            print(f"Rendering {name}...")
+            img = fn()
+            out_path = os.path.join(out_dir, f"{name}.png")
+            img.save(out_path, "PNG", optimize=True)
+            print(f"  -> {out_path}  ({os.path.getsize(out_path) // 1024} KB)")
     print("Done.")
