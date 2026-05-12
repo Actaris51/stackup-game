@@ -250,8 +250,14 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
     // Note: incrementGamesPlayed + Game Center submission already happened in
     // the game-over useEffect above. Here we just decide whether to show an
     // interstitial based on the games-played count.
+    //
+    // Guard against back-to-back ads: if the player already watched a rewarded
+    // ad in this session via "Continue", suppress the next interstitial. Two
+    // ads in quick succession (rewarded → die → restart → interstitial) feels
+    // punishing and is the most common "why is there an ad now?" UX complaint.
     const gamesPlayed = await getGamesPlayed();
-    if (gamesPlayed % AD_CONFIG.INTERSTITIAL_FREQUENCY === 0) {
+    const onCadence = gamesPlayed % AD_CONFIG.INTERSTITIAL_FREQUENCY === 0;
+    if (onCadence && !hasContinued) {
       await showInterstitial();
     }
     setFallingPieces([]);
@@ -262,7 +268,7 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
     reset();
     setStarted(false);
     setHasContinued(false);
-  }, [reset]);
+  }, [reset, hasContinued]);
 
   const handleContinue = useCallback(async () => {
     const watched = await showRewarded();
