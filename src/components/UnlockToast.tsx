@@ -1,11 +1,11 @@
 // Floating toast that announces newly unlocked content (themes / modes) at
 // game over. Cycles through multiple unlocks one at a time.
 //
-// Renders absolutely positioned at the top of the GameScreen, ABOVE the
-// GameOverModal (the modal uses RN Modal which is rendered outside the React
-// tree, so a sibling sits visually above only because of its zIndex / order
-// in the layout — we render this AFTER the modal and on iOS its absolute
-// position with high zIndex handles it cleanly).
+// Renders inline — designed to be slotted into the GameOverModal's banner
+// slot so it sits ABOVE the modal's dark overlay. Earlier revisions placed
+// this absolutely at top:70 as a sibling of the modal, but RN's Modal opens
+// in a separate native window so siblings can't actually layer above it.
+// Embedding it inside the modal fixed the "invisible unlock toast" bug.
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -143,12 +143,8 @@ function describeUnlock(rule: UnlockRule): {
 
 const styles = StyleSheet.create({
   container: {
-    position: 'absolute',
-    top: 70,
-    left: 20,
-    right: 20,
+    alignSelf: 'stretch',
     alignItems: 'center',
-    zIndex: 1000,
   },
   toast: {
     flexDirection: 'row',
@@ -161,6 +157,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
     minWidth: 240,
+    maxWidth: '100%',
   },
   icon: {
     fontSize: 28,
