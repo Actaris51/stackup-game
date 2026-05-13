@@ -32,6 +32,14 @@ interface CustomizeScreenProps {
   onChangeTheme: (id: ThemeId) => void;
   onChangeDifficulty: (id: DifficultyId) => void;
   onBack: () => void;
+  /** Optional jump-into-game CTA on the selected difficulty row. */
+  onPlay?: () => void;
+}
+
+interface ProgressState {
+  bestScore: number;
+  totalBlocks: number;
+  gamesPlayed: number;
 }
 
 export function CustomizeScreen({
@@ -40,6 +48,7 @@ export function CustomizeScreen({
   onChangeTheme,
   onChangeDifficulty,
   onBack,
+  onPlay,
 }: CustomizeScreenProps) {
   const [unlockedThemes, setUnlockedThemes] = useState<Set<ThemeId>>(
     new Set(['classic'])
@@ -47,6 +56,11 @@ export function CustomizeScreen({
   const [unlockedDifficulties, setUnlockedDifficulties] = useState<
     Set<DifficultyId>
   >(new Set(['chill', 'classic']));
+  const [progress, setProgress] = useState<ProgressState>({
+    bestScore: 0,
+    totalBlocks: 0,
+    gamesPlayed: 0,
+  });
 
   useEffect(() => {
     (async () => {
@@ -56,6 +70,7 @@ export function CustomizeScreen({
         getGamesPlayed(),
       ]);
       const state = { bestScore, totalBlocks, gamesPlayed };
+      setProgress(state);
       setUnlockedThemes(new Set(getUnlockedThemeIds(state)));
       setUnlockedDifficulties(new Set(getUnlockedDifficultyIds(state)));
     })();
@@ -64,7 +79,7 @@ export function CustomizeScreen({
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+        <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={16}>
           <Text style={[styles.backText, { color: theme.text }]}>‹ Retour</Text>
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: theme.text }]}>
@@ -92,7 +107,7 @@ export function CustomizeScreen({
                 theme={t}
                 selected={selected}
                 unlocked={unlocked}
-                unlockHint={getUnlockHint('theme', id)}
+                unlockHint={getUnlockHint('theme', id, progress)}
                 accent={theme.accent}
                 textColor={theme.text}
                 textSecondary={theme.textSecondary}
@@ -122,11 +137,12 @@ export function CustomizeScreen({
                 difficulty={d}
                 selected={selected}
                 unlocked={unlocked}
-                unlockHint={getUnlockHint('difficulty', id)}
+                unlockHint={getUnlockHint('difficulty', id, progress)}
                 accent={theme.accent}
                 textColor={theme.text}
                 textSecondary={theme.textSecondary}
                 onPress={() => unlocked && onChangeDifficulty(id)}
+                onPlay={selected && onPlay ? onPlay : undefined}
               />
             );
           })}
@@ -222,6 +238,9 @@ interface DifficultyRowProps {
   textColor: string;
   textSecondary: string;
   onPress: () => void;
+  /** When provided AND this row is selected, render a ▶ shortcut that
+   *  jumps straight into a game with the chosen mode. */
+  onPlay?: () => void;
 }
 
 function DifficultyRow({
@@ -233,6 +252,7 @@ function DifficultyRow({
   textColor,
   textSecondary,
   onPress,
+  onPlay,
 }: DifficultyRowProps) {
   return (
     <TouchableOpacity
@@ -244,6 +264,8 @@ function DifficultyRow({
           borderColor: selected ? accent : 'rgba(255,255,255,0.08)',
           borderWidth: selected ? 2 : 1,
           opacity: unlocked ? 1 : 0.55,
+          flexDirection: 'row',
+          alignItems: 'center',
         },
       ]}
     >
@@ -273,28 +295,56 @@ function DifficultyRow({
           </Text>
         )}
       </View>
+      {onPlay && (
+        <TouchableOpacity
+          onPress={onPlay}
+          activeOpacity={0.7}
+          style={[styles.playShortcut, { backgroundColor: accent }]}
+          hitSlop={10}
+        >
+          <Text style={[styles.playShortcutText, { color: COLORS.buttonText }]}>
+            ▶
+          </Text>
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 }
 
 // ---------- helper: human-readable unlock hint ----------
 
+/**
+ * Returns a human-readable unlock hint, suffixed with the player's current
+ * progress towards the threshold. Without the current value the hint just
+ * states the target — adding "(actuel : X)" turns the screen into a real
+ * progress dashboard and gives the player a concrete next step.
+ */
 function getUnlockHint(
   kind: 'theme' | 'difficulty',
-  id: string
+  id: string,
+  progress?: ProgressState
 ): string | undefined {
   const rule = UNLOCK_RULES.find(
     (r) => r.target.kind === kind && r.target.id === (id as any)
   );
   if (!rule) return undefined;
   const { metric, threshold } = rule.condition;
+  const currentValue = progress
+    ? metric === 'bestScore'
+      ? progress.bestScore
+      : metric === 'totalBlocks'
+      ? progress.totalBlocks
+      : progress.gamesPlayed
+    : undefined;
+  const suffix =
+    currentValue !== undefined ? ` — actuel : ${currentValue}` : '';
   switch (metric) {
     case 'bestScore':
-      return `Score ${threshold} en mode compétitif`;
+      return `Score ${threshold} en mode compétitif${suffix}`;
     case 'totalBlocks':
-      return `Empile ${threshold} blocs au total`;
+      return `Empile ${threshold} blocs au total${suffix}`;
     case 'gamesPlayed':
-      return `Joue ${threshold} parties`;
+      return `Joue ${threshold} parties${suffix}`;
   }
 }
 
@@ -428,6 +478,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontStyle: 'italic',
     marginTop: 6,
+  },
+  playShortcut: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  playShortcutText: {
+    fontSize: 16,
+    fontWeight: '900',
+    marginLeft: 2, // optical centring for the triangle glyph
   },
   footnote: {
     fontSize: 11,

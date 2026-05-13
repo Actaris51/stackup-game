@@ -4,15 +4,23 @@ import { StatusBar } from 'expo-status-bar';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { GameScreen } from './src/screens/GameScreen';
 import { CustomizeScreen } from './src/screens/CustomizeScreen';
+import { OnboardingOverlay } from './src/components/OnboardingOverlay';
 import { initializeAds, requestATTPermissionIfNeeded } from './src/utils/ads';
-import { authenticate as authenticateGameCenter } from './src/utils/gameCenter';
+import {
+  authenticate as authenticateGameCenter,
+  installGameCenterAppStateListener,
+} from './src/utils/gameCenter';
 import {
   getActiveDifficulty,
   getActiveTheme,
+  isOnboardingSeen,
+  markOnboardingSeen,
   runV11MigrationIfNeeded,
   setActiveDifficulty as persistActiveDifficulty,
   setActiveTheme as persistActiveTheme,
+  tickDailyStreak,
 } from './src/utils/storage';
+import { initSounds } from './src/utils/sounds';
 import {
   DEFAULT_DIFFICULTY_ID,
   DEFAULT_THEME_ID,
@@ -30,6 +38,8 @@ export default function App() {
   const [activeDifficultyId, setActiveDifficultyIdState] =
     useState<DifficultyId>(DEFAULT_DIFFICULTY_ID);
   const [bootstrapped, setBootstrapped] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [dailyStreak, setDailyStreak] = useState(0);
 
   // First-mount: migrate legacy data, load preferences, kick off ads + GC auth.
   useEffect(() => {
@@ -40,15 +50,28 @@ export default function App() {
         console.log('[App] v1.1 migration failed (non-fatal)', e);
       }
       try {
-        const [themeId, difficultyId] = await Promise.all([
+        const [themeId, difficultyId, onboardingSeen, streak] = await Promise.all([
           getActiveTheme(),
           getActiveDifficulty(),
+          isOnboardingSeen(),
+          tickDailyStreak(),
         ]);
         setActiveThemeIdState(themeId);
         setActiveDifficultyIdState(difficultyId);
+        setShowOnboarding(!onboardingSeen);
+        setDailyStreak(streak);
       } catch (e) {
         console.log('[App] failed to load preferences', e);
       }
+
+      // Preload sound effects so the first place-sound on a fresh app has
+      // zero latency. Safe to call even if expo-audio is missing.
+      try {
+        initSounds();
+      } catch (e) {
+        console.log('[App] sounds init failed (non-fatal)', e);
+      }
+
       setBootstrapped(true);
 
       // Sequencing matters per Apple Guideline 2.1 (rejection on v1.0.1 build 13):
@@ -59,7 +82,18 @@ export default function App() {
       await requestATTPermissionIfNeeded();
       initializeAds();
       authenticateGameCenter();
+      // Re-auth when the user comes back from Settings (could've signed out).
+      installGameCenterAppStateListener();
     })();
+  }, []);
+
+  const handleOnboardingDismiss = useCallback(async () => {
+    setShowOnboarding(false);
+    try {
+      await markOnboardingSeen();
+    } catch (e) {
+      console.log('[App] failed to persist onboarding flag', e);
+    }
   }, []);
 
   const theme = getTheme(activeThemeId);
@@ -100,6 +134,7 @@ export default function App() {
         <HomeScreen
           theme={theme}
           difficulty={difficulty}
+          dailyStreak={dailyStreak}
           onPlay={() => setScreen('game')}
           onCustomize={() => setScreen('customize')}
         />
@@ -118,7 +153,11 @@ export default function App() {
           onChangeTheme={handleChangeTheme}
           onChangeDifficulty={handleChangeDifficulty}
           onBack={() => setScreen('home')}
+          onPlay={() => setScreen('game')}
         />
+      )}
+      {showOnboarding && (
+        <OnboardingOverlay theme={theme} onDone={handleOnboardingDismiss} />
       )}
     </>
   );

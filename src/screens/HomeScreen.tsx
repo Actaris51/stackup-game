@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import * as Application from 'expo-application';
 import { COLORS, type Difficulty, type Theme } from '../constants';
 import { getHighScoreForMode } from '../utils/storage';
 import { isGameCenterAvailable, showGameCenter } from '../utils/gameCenter';
@@ -7,6 +8,8 @@ import { isGameCenterAvailable, showGameCenter } from '../utils/gameCenter';
 interface HomeScreenProps {
   theme: Theme;
   difficulty: Difficulty;
+  /** Streak count from App.tsx (0 means "no streak yet today"). */
+  dailyStreak: number;
   onPlay: () => void;
   onCustomize: () => void;
 }
@@ -14,6 +17,7 @@ interface HomeScreenProps {
 export function HomeScreen({
   theme,
   difficulty,
+  dailyStreak,
   onPlay,
   onCustomize,
 }: HomeScreenProps) {
@@ -25,6 +29,11 @@ export function HomeScreen({
     setShowGameCenterButton(isGameCenterAvailable());
   }, [difficulty.id]);
 
+  // Expo bakes the version from app.json into Application.nativeApplicationVersion
+  // on native, and falls back to the JS-known version otherwise.
+  const appVersion =
+    Application.nativeApplicationVersion ?? '1.1.2';
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.titleContainer}>
@@ -33,14 +42,18 @@ export function HomeScreen({
       </View>
 
       <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-        Tap to stack. Don't miss.
+        Tape, empile, vise juste.
       </Text>
 
-      {/* Active mode chip — small but visible above the PLAY button */}
+      {/* Active mode chip — single source of access to Customize. The old
+          layout had this chip *and* a redundant secondary button at the
+          bottom; both routed to the same screen. Kept the chip because
+          it doubles as an at-a-glance status indicator. */}
       <TouchableOpacity
         onPress={onCustomize}
         activeOpacity={0.7}
         style={[styles.modeChip, { borderColor: theme.accent }]}
+        hitSlop={6}
       >
         <Text style={[styles.modeChipLabel, { color: theme.textSecondary }]}>
           MODE
@@ -61,27 +74,32 @@ export function HomeScreen({
         <Text style={[styles.playText, { color: COLORS.buttonText }]}>PLAY</Text>
       </TouchableOpacity>
 
-      {modeBest > 0 && (
-        <View style={styles.highScoreContainer}>
-          <Text style={[styles.highScoreLabel, { color: theme.textSecondary }]}>
-            BEST ({difficulty.nameEN.toUpperCase()})
-          </Text>
-          <Text style={[styles.highScoreValue, { color: theme.text }]}>
-            {modeBest}
-          </Text>
-        </View>
-      )}
+      {/* Best-score block reserves its own height so the PLAY button doesn't
+          jump when this view appears on first record. */}
+      <View style={styles.highScoreContainer}>
+        {modeBest > 0 ? (
+          <>
+            <Text style={[styles.highScoreLabel, { color: theme.textSecondary }]}>
+              MEILLEUR ({difficulty.name.toUpperCase()})
+            </Text>
+            <Text style={[styles.highScoreValue, { color: theme.text }]}>
+              {modeBest}
+            </Text>
+          </>
+        ) : null}
+      </View>
 
       <View style={styles.bottomActions}>
-        <TouchableOpacity
-          onPress={onCustomize}
-          activeOpacity={0.7}
-          style={[styles.secondaryButton, { borderColor: theme.textSecondary }]}
-        >
-          <Text style={[styles.secondaryButtonText, { color: theme.textSecondary }]}>
-            🎨 PERSONNALISER
-          </Text>
-        </TouchableOpacity>
+        {dailyStreak > 1 && (
+          // Show the streak only when it's worth bragging about — a fresh
+          // streak of 1 isn't a habit yet, just a single play.
+          <View style={[styles.streakPill, { borderColor: theme.accent }]}>
+            <Text style={[styles.streakEmoji]}>🔥</Text>
+            <Text style={[styles.streakText, { color: theme.text }]}>
+              {dailyStreak} jours de suite
+            </Text>
+          </View>
+        )}
 
         {showGameCenterButton && (
           <TouchableOpacity
@@ -97,6 +115,12 @@ export function HomeScreen({
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Version footer — tiny, useful for testers reporting bugs ("I'm on
+          v1.1.2 build X and …"). */}
+      <Text style={[styles.versionText, { color: theme.textSecondary }]}>
+        v{appVersion}
+      </Text>
     </View>
   );
 }
@@ -164,6 +188,11 @@ const styles = StyleSheet.create({
   highScoreContainer: {
     marginTop: 36,
     alignItems: 'center',
+    // Reserved height so the PLAY button doesn't jump up by 60px when the
+    // user beats their first score. (label 12px line + 36px score + 4 spacing
+    // ≈ 60. Constant matches actual rendered height to avoid Cumulative
+    // Layout Shift on second app launch when modeBest flips from 0 → N.)
+    minHeight: 60,
   },
   highScoreLabel: {
     fontSize: 12,
@@ -180,6 +209,23 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
   },
+  streakPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  streakEmoji: {
+    fontSize: 14,
+  },
+  streakText: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
   secondaryButton: {
     paddingHorizontal: 22,
     paddingVertical: 12,
@@ -190,5 +236,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 2,
+  },
+  versionText: {
+    position: 'absolute',
+    bottom: 20,
+    fontSize: 10,
+    fontWeight: '500',
+    letterSpacing: 1,
+    opacity: 0.55,
   },
 });
