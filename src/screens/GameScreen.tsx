@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
+  Text,
   StyleSheet,
+  TouchableOpacity,
   TouchableWithoutFeedback,
   StatusBar,
   Animated,
@@ -18,6 +20,7 @@ import { PerfectEffect } from '../components/PerfectEffect';
 import { ScorePopup } from '../components/ScorePopup';
 import { TapToStart } from '../components/TapToStart';
 import { UnlockToast } from '../components/UnlockToast';
+import { PauseModal } from '../components/PauseModal';
 import {
   GAME,
   findNewlyUnlocked,
@@ -31,6 +34,7 @@ import {
   getCompetitiveBestScore,
   getGamesPlayed,
   getHighScoreForMode,
+  getMaxPerfectStreak,
   getSeenUnlocks,
   getTotalBlocks,
   incrementGamesPlayed,
@@ -76,17 +80,22 @@ interface PerfectEffectData {
 let effectIdCounter = 0;
 
 export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
-  const { gameData, startGame, tap, reset, continueGame } = useGameEngine({
-    difficulty,
-    theme,
-  });
+  const { gameData, startGame, tap, reset, continueGame, pauseLoop, resumeLoop } =
+    useGameEngine({ difficulty, theme });
   const [hasContinued, setHasContinued] = useState(false);
   const [started, setStarted] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   // Game-over context passed to the modal (filled by the post-game async flow).
   const [modeBest, setModeBest] = useState(0);
   const [isNewRecord, setIsNewRecord] = useState(false);
   const [newlyUnlocked, setNewlyUnlocked] = useState<UnlockRule[]>([]);
+  // Cumulative-stats snapshot shown in the modal after game over.
+  const [cumulativeStats, setCumulativeStats] = useState<{
+    gamesPlayed?: number;
+    totalBlocks?: number;
+    maxPerfectStreak?: number;
+  } | null>(null);
 
   // Effects state
   const [fallingPieces, setFallingPieces] = useState<FallingPieceData[]>([]);
@@ -124,7 +133,10 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
           // Persist stats
           const gamesPlayed = await incrementGamesPlayed();
           const totalBlocks = await addBlocksToTotal(blocksPlaced);
-          await updateMaxPerfectStreak(maxStreakInGame);
+          const maxPerfectStreak = await updateMaxPerfectStreak(maxStreakInGame);
+
+          // Surface cumulative stats in the game-over modal for engagement.
+          setCumulativeStats({ gamesPlayed, totalBlocks, maxPerfectStreak });
 
           // Per-mode high score
           const { beatModeRecord } = await setHighScoreForMode(modeId, finalScore);
@@ -132,19 +144,23 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
           setModeBest(modeBestNow);
           setIsNewRecord(beatModeRecord);
 
-          // Game Center
-          await submitGameOverScores({
-            finalScore,
-            totalBlocks,
-            difficulty: modeId,
-          });
-          await processAchievements({
-            finalScore,
-            maxPerfectStreakInGame: maxStreakInGame,
-            gamesPlayed,
-            totalBlocks,
-            difficulty: modeId,
-          });
+          // Game Center submissions + achievements run in parallel — each call
+          // bridges to native, and a sequential await chain visibly stalled
+          // the modal reveal by 200-500 ms on long-play sessions.
+          await Promise.all([
+            submitGameOverScores({
+              finalScore,
+              totalBlocks,
+              difficulty: modeId,
+            }),
+            processAchievements({
+              finalScore,
+              maxPerfectStreakInGame: maxStreakInGame,
+              gamesPlayed,
+              totalBlocks,
+              difficulty: modeId,
+            }),
+          ]);
 
           // Unlocks (use competitive best, not chill/zen)
           const competitiveBest = await getCompetitiveBestScore();
@@ -171,8 +187,14 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
   useEffect(() => {
     if (gameData.score > prevScoreRef.current && gameData.state === 'playing') {
       const blockCount = gameData.stackedBlocks.length;
-      const blockY =
-        GAME.STACK_AREA_HEIGHT - blockCount * GAME.BLOCK_HEIGHT;
+      // Visible stack tops out at VISIBLE_STACK_COUNT — beyond that the
+      // rendered stack appears at the same y while the logical count keeps
+      // climbing. Clamp the popup/falling-piece anchor so effects stay
+      // pinned to the actual on-screen top block in long runs (Zen mode
+      // especially).
+      const visibleStackHeight =
+        Math.min(blockCount, GAME.VISIBLE_STACK_COUNT) * GAME.BLOCK_HEIGHT;
+      const blockY = GAME.STACK_AREA_HEIGHT - visibleStackHeight;
       const topBlock = gameData.stackedBlocks[blockCount - 1];
 
       if (gameData.isPerfect) {
@@ -233,18 +255,20 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
   }, [difficulty.id, gameData.state]);
 
   const handleTap = useCallback(() => {
+    if (paused) return; // ignore taps while the pause overlay is up
     if (!started) {
       startGame();
       setStarted(true);
       setHasContinued(false);
       setNewlyUnlocked([]);
       setIsNewRecord(false);
+      setCumulativeStats(null);
       return;
     }
     if (gameData.state === 'playing') {
       tap();
     }
-  }, [started, gameData.state, startGame, tap]);
+  }, [paused, started, gameData.state, startGame, tap]);
 
   const handleRestart = useCallback(async () => {
     // Note: incrementGamesPlayed + Game Center submission already happened in
@@ -265,10 +289,34 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
     setPerfectEffects([]);
     setNewlyUnlocked([]);
     setIsNewRecord(false);
+    setCumulativeStats(null);
     reset();
     setStarted(false);
     setHasContinued(false);
   }, [reset, hasContinued]);
+
+  // --- Pause handlers ---
+  const openPause = useCallback(() => {
+    if (gameData.state !== 'playing' || paused) return;
+    setPaused(true);
+    pauseLoop();
+  }, [gameData.state, paused, pauseLoop]);
+
+  const resumeFromPause = useCallback(() => {
+    setPaused(false);
+    resumeLoop();
+  }, [resumeLoop]);
+
+  const quitFromPause = useCallback(() => {
+    setPaused(false);
+    // Don't persist any partial stats — quitting from pause is an abort,
+    // not a game over. Just unwind to home.
+    reset();
+    setStarted(false);
+    setHasContinued(false);
+    setCumulativeStats(null);
+    onHome();
+  }, [reset, onHome]);
 
   const handleContinue = useCallback(async () => {
     const watched = await showRewarded();
@@ -294,10 +342,16 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
     setNewlyUnlocked([]);
   }, []);
 
+  // Once the stack passes VISIBLE_STACK_COUNT, the rendered tower stops
+  // growing visually (Stack.tsx only renders the last N blocks). The moving
+  // block must clamp to that ceiling, otherwise it floats off-screen as the
+  // logical count keeps climbing — fatal in Zen mode.
+  const visibleBlocks = Math.min(
+    gameData.stackedBlocks.length,
+    GAME.VISIBLE_STACK_COUNT
+  );
   const movingBlockY =
-    GAME.STACK_AREA_HEIGHT -
-    gameData.stackedBlocks.length * GAME.BLOCK_HEIGHT -
-    GAME.BLOCK_HEIGHT;
+    GAME.STACK_AREA_HEIGHT - visibleBlocks * GAME.BLOCK_HEIGHT - GAME.BLOCK_HEIGHT;
 
   return (
     <TouchableWithoutFeedback onPress={handleTap}>
@@ -310,13 +364,28 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
         <StatusBar barStyle="light-content" />
 
         {/* Score */}
-        <View style={styles.scoreContainer}>
+        <View style={styles.scoreContainer} pointerEvents="box-none">
           <ScoreDisplay
             score={gameData.score}
             isPerfect={gameData.isPerfect}
             perfectStreak={gameData.perfectStreak}
           />
         </View>
+
+        {/* Pause button — only meaningful during an active game, hidden on
+            idle (TapToStart already covers the screen) and on game over. */}
+        {gameData.state === 'playing' && !paused && (
+          <TouchableOpacity
+            onPress={openPause}
+            style={styles.pauseButton}
+            hitSlop={16}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.pauseGlyph, { color: theme.textSecondary }]}>
+              ⏸
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* Game area */}
         <View style={styles.gameArea}>
@@ -391,12 +460,25 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
           onContinue={handleContinue}
           hasContinued={hasContinued}
           onHome={onHome}
+          cumulativeStats={cumulativeStats ?? undefined}
+          banner={
+            newlyUnlocked.length > 0 ? (
+              <UnlockToast
+                unlocks={newlyUnlocked}
+                theme={theme}
+                onDismiss={handleUnlockToastDismiss}
+              />
+            ) : null
+          }
         />
 
-        {/* Newly unlocked content (themes/modes). Renders above the modal. */}
-        {newlyUnlocked.length > 0 && gameData.state === 'gameOver' && (
-          <UnlockToast unlocks={newlyUnlocked} theme={theme} onDismiss={handleUnlockToastDismiss} />
-        )}
+        {/* Pause overlay. Independent Modal so it can sit above gameplay. */}
+        <PauseModal
+          visible={paused}
+          theme={theme}
+          onResume={resumeFromPause}
+          onQuit={quitFromPause}
+        />
       </Animated.View>
     </TouchableWithoutFeedback>
   );
@@ -413,6 +495,22 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     alignItems: 'center',
+  },
+  pauseButton: {
+    position: 'absolute',
+    top: 56,
+    right: 22,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    zIndex: 15,
+  },
+  pauseGlyph: {
+    fontSize: 18,
+    fontWeight: '700',
   },
   gameArea: {
     flex: 1,

@@ -64,6 +64,13 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
   const animFrameRef = useRef<number | null>(null);
   const gameDataRef = useRef<GameData>(gameData);
   gameDataRef.current = gameData;
+  /**
+   * Source of truth for whether the RAF loop should keep scheduling.
+   * Decoupled from React state so the loop can exit synchronously without
+   * waiting for a state update to propagate. Flipped to true by startGame /
+   * continueGame, to false by every codepath that ends or pauses the game.
+   */
+  const isLoopRunningRef = useRef(false);
 
   // Keep idle state in sync with the picked theme/difficulty so the home
   // screen / preview reflects the selection without requiring a tap.
@@ -74,7 +81,29 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
     });
   }, [difficulty.id, theme.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Cleanup on unmount — without this, a partial RAF chain leaks if the user
+  // navigates away mid-game (e.g. tapping the Menu button on Game Over while
+  // continueGame() is queued, or any future deep-link navigation).
+  useEffect(() => {
+    return () => {
+      isLoopRunningRef.current = false;
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+    };
+  }, []);
+
   const gameLoop = useCallback(() => {
+    // Exit early if any caller flipped the flag (gameOver, reset, unmount).
+    // This is the only check that breaks the RAF chain — the previous code
+    // unconditionally scheduled the next frame, which kept the loop alive
+    // long after game over and bled battery on long sessions.
+    if (!isLoopRunningRef.current) {
+      animFrameRef.current = null;
+      return;
+    }
+
     setGameData((prev) => {
       if (prev.state !== 'playing') return prev;
 
@@ -105,6 +134,27 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
     const initial = createInitialState(difficultyRef.current, themeRef.current);
     initial.state = 'playing';
     setGameData(initial);
+    isLoopRunningRef.current = true;
+    animFrameRef.current = requestAnimationFrame(gameLoop);
+  }, [gameLoop]);
+
+  /**
+   * Pause/resume the RAF loop without changing the public game state. The
+   * UI shows "playing" but the moving block freezes. Used by the pause
+   * overlay so callers, e.g. a phone call interruption, don't auto-lose.
+   */
+  const pauseLoop = useCallback(() => {
+    isLoopRunningRef.current = false;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+  }, []);
+
+  const resumeLoop = useCallback(() => {
+    if (isLoopRunningRef.current) return; // already running
+    if (gameDataRef.current.state !== 'playing') return;
+    isLoopRunningRef.current = true;
     animFrameRef.current = requestAnimationFrame(gameLoop);
   }, [gameLoop]);
 
@@ -129,7 +179,11 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
           // Zen mode: ignore the bad tap, keep playing.
           return prev;
         }
-        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+        isLoopRunningRef.current = false;
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current);
+          animFrameRef.current = null;
+        }
         return { ...prev, state: 'gameOver' as GameState, lastCutPiece: null, lastScoreGain: 0 };
       }
 
@@ -165,7 +219,11 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
           newWidth = GAME.MIN_BLOCK_WIDTH;
           newBlock = { ...newBlock, width: newWidth };
         } else {
-          if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+          isLoopRunningRef.current = false;
+          if (animFrameRef.current) {
+            cancelAnimationFrame(animFrameRef.current);
+            animFrameRef.current = null;
+          }
           return { ...prev, state: 'gameOver' as GameState, lastCutPiece: null, lastScoreGain: 0 };
         }
       }
@@ -174,8 +232,24 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
       const newMaxPerfectStreak = Math.max(prev.maxPerfectStreak, newPerfectStreak);
       const scoreBonus = isPerfect ? 3 + newPerfectStreak : 1;
       const newScore = prev.score + scoreBonus;
-      const blockIndex = prev.stackedBlocks.length + 1;
-      const newSpeed = computeSpeed(diff, prev.stackedBlocks.length);
+      // Colour cycles on the cumulative block counter (monotonic) so that
+      // capping stackedBlocks below doesn't make the palette restart visually
+      // in long Zen runs.
+      const nextColourIndex = prev.blocksPlacedThisGame + 2;
+      const newSpeed = computeSpeed(diff, prev.blocksPlacedThisGame);
+
+      // Bound the stack history. Render already uses VISIBLE_STACK_COUNT and
+      // gameplay only needs the topmost block — anything older is dead
+      // memory. Without this cap, Zen mode allocates O(n²) over a long run
+      // (each tap rebuilds an ever-larger array) and noticeably stutters
+      // past a few thousand blocks. STACK_HISTORY_CAP > VISIBLE_STACK_COUNT
+      // so render stays seamless across the truncation seam.
+      const STACK_HISTORY_CAP = 50;
+      const appended = [...prev.stackedBlocks, newBlock];
+      const trimmedStack =
+        appended.length > STACK_HISTORY_CAP
+          ? appended.slice(appended.length - STACK_HISTORY_CAP)
+          : appended;
 
       return {
         ...prev,
@@ -186,11 +260,11 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
         isPerfect,
         lastCutPiece: cutPiece,
         lastScoreGain: scoreBonus,
-        stackedBlocks: [...prev.stackedBlocks, newBlock],
+        stackedBlocks: trimmedStack,
         movingBlock: {
           x: 0,
           width: newWidth,
-          color: getBlockColorFromTheme(thm, blockIndex),
+          color: getBlockColorFromTheme(thm, nextColourIndex),
           direction: 1 as const,
         },
         speed: newSpeed,
@@ -199,7 +273,11 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
   }, []);
 
   const reset = useCallback(() => {
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    isLoopRunningRef.current = false;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
     setGameData(createInitialState(difficultyRef.current, themeRef.current));
   }, []);
 
@@ -214,15 +292,16 @@ export function useGameEngine(opts?: UseGameEngineOptions) {
         movingBlock: {
           x: 0,
           width: Math.max(topBlock.width, GAME.INITIAL_BLOCK_WIDTH * 0.3),
-          color: getBlockColorFromTheme(thm, prev.stackedBlocks.length),
+          color: getBlockColorFromTheme(thm, prev.blocksPlacedThisGame + 1),
           direction: 1 as const,
         },
       };
     });
+    isLoopRunningRef.current = true;
     animFrameRef.current = requestAnimationFrame(gameLoop);
   }, [gameLoop]);
 
-  return { gameData, startGame, tap, reset, continueGame };
+  return { gameData, startGame, tap, reset, continueGame, pauseLoop, resumeLoop };
 }
 
 // --- helpers ---
