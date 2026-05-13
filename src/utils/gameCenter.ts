@@ -8,7 +8,7 @@
 // or declines, every function below resolves cleanly without error so game UX
 // is never blocked on Game Center.
 
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { getDifficulty, type DifficultyId } from '../constants';
 import {
   ACHIEVEMENTS,
@@ -83,6 +83,35 @@ export async function authenticate(): Promise<boolean> {
   })();
 
   return authPromise;
+}
+
+/**
+ * Re-attempt silent auth from scratch. Used by the AppState listener to
+ * pick up sign-in / sign-out changes the user makes outside the app via
+ * iOS Settings — without this, the JS layer would keep believing it was
+ * authed after a sign-out and submit scores that silently fail.
+ */
+export async function reauthenticate(): Promise<boolean> {
+  authPromise = null;
+  isAuthenticated = false;
+  return authenticate();
+}
+
+// Re-check auth whenever the app returns to the foreground. The user could
+// have toggled Game Center off (or on) in Réglages during the trip away.
+let appStateSubInstalled = false;
+export function installGameCenterAppStateListener() {
+  if (appStateSubInstalled) return;
+  if (Platform.OS !== 'ios' || !nativeModule) return;
+  appStateSubInstalled = true;
+  let prev = AppState.currentState;
+  AppState.addEventListener('change', (next) => {
+    if (prev !== 'active' && next === 'active') {
+      // Fire-and-forget — failure is non-fatal.
+      reauthenticate().catch(() => {});
+    }
+    prev = next;
+  });
 }
 
 export function isGameCenterAvailable(): boolean {

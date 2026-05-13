@@ -53,9 +53,26 @@ function shouldUseTestAds(): boolean {
   if (__DEV__) return true;
   if (Platform.OS === 'ios') {
     // ApplicationReleaseType: 0=unknown, 1=simulator, 2=enterprise,
-    // 3=development, 4=adHoc, 5=appStore
-    const type = (Application as any).iosApplicationReleaseType;
-    if (typeof type === 'number' && type !== 5) return true;
+    // 3=development, 4=adHoc, 5=appStore. Available since expo-application
+    // 5.x. Be defensive: if the property is absent (older SDK or web), we
+    // default to PROD ads — but only when we can also positively confirm
+    // we're on a real iOS build (release channel populated, etc.).
+    const appCompat = Application as unknown as {
+      iosApplicationReleaseType?: number;
+      applicationReleaseType?: number;
+    };
+    const type = appCompat.iosApplicationReleaseType ?? appCompat.applicationReleaseType;
+    if (typeof type === 'number') {
+      if (type !== 5) return true;
+    } else {
+      // Property genuinely missing — treat as suspicious and serve TEST ads
+      // to avoid serving real ads to ourselves (TestFlight, simulator…).
+      // The cost of misclassifying an App Store install as test is one user
+      // who sees Google's filler ad for one session; the inverse risk is
+      // an AdMob ban for invalid traffic. We pick the safer side.
+      console.log('[Ads] iosApplicationReleaseType missing — defaulting to TEST ads');
+      return true;
+    }
   }
   return false;
 }
@@ -212,6 +229,8 @@ export async function initializeAds(): Promise<void> {
   return initPromise;
 }
 
+const AD_TIMEOUT_MS = 8000;
+
 export async function showInterstitial(): Promise<void> {
   if (!isNative || !InterstitialAd) {
     console.log('[Ads] Interstitial skipped (web)');
@@ -221,21 +240,28 @@ export async function showInterstitial(): Promise<void> {
 
   return new Promise((resolve) => {
     const ad = InterstitialAd.createForAdRequest(AD_CONFIG.INTERSTITIAL_ID);
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      unsubLoaded();
+      unsubClosed();
+      unsubError();
+      clearTimeout(timer);
+      resolve();
+    };
     const unsubLoaded = ad.addAdEventListener(AdEventType.LOADED, () => {
       ad.show();
     });
-    const unsubClosed = ad.addAdEventListener(AdEventType.CLOSED, () => {
-      unsubLoaded();
-      unsubClosed();
-      unsubError();
-      resolve();
-    });
-    const unsubError = ad.addAdEventListener(AdEventType.ERROR, () => {
-      unsubLoaded();
-      unsubClosed();
-      unsubError();
-      resolve();
-    });
+    const unsubClosed = ad.addAdEventListener(AdEventType.CLOSED, settle);
+    const unsubError = ad.addAdEventListener(AdEventType.ERROR, settle);
+    // Hard timeout: if the SDK fires neither LOADED→CLOSED nor ERROR
+    // (corner-case network failures we've seen in the wild), the player
+    // would be stuck on Game Over forever waiting for the await to return.
+    const timer = setTimeout(() => {
+      console.log('[Ads] Interstitial timed out, unblocking player');
+      settle();
+    }, AD_TIMEOUT_MS);
     ad.load();
   });
 }
@@ -250,6 +276,17 @@ export async function showRewarded(): Promise<boolean> {
   return new Promise((resolve) => {
     const ad = RewardedAd.createForAdRequest(AD_CONFIG.REWARDED_ID);
     let rewarded = false;
+    let settled = false;
+
+    function cleanup() {
+      if (settled) return;
+      settled = true;
+      unsubLoaded();
+      unsubEarned();
+      unsubClosed();
+      unsubError();
+      clearTimeout(timer);
+    }
 
     const unsubLoaded = ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
       ad.show();
@@ -269,12 +306,13 @@ export async function showRewarded(): Promise<boolean> {
       resolve(false);
     });
 
-    function cleanup() {
-      unsubLoaded();
-      unsubEarned();
-      unsubClosed();
-      unsubError();
-    }
+    // Same timeout safety net as interstitials. Rewarded ads have stricter
+    // expected response (the user wants a reward), so failing fast = OK.
+    const timer = setTimeout(() => {
+      console.log('[Ads] Rewarded timed out, denying reward');
+      cleanup();
+      resolve(false);
+    }, AD_TIMEOUT_MS);
 
     ad.load();
   });
