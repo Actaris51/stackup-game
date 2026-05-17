@@ -21,6 +21,7 @@ import { ScorePopup } from '../components/ScorePopup';
 import { TapToStart } from '../components/TapToStart';
 import { UnlockToast } from '../components/UnlockToast';
 import { PauseModal } from '../components/PauseModal';
+import { ThemedBackground } from '../components/ThemedBackground';
 import {
   GAME,
   findNewlyUnlocked,
@@ -356,11 +357,13 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
   return (
     <TouchableWithoutFeedback onPress={handleTap}>
       <Animated.View
-        style={[
-          styles.container,
-          { backgroundColor: theme.background, transform: [{ translateX: shakeX }] },
-        ]}
+        style={[styles.container, { transform: [{ translateX: shakeX }] }]}
       >
+        {/* Ambient themed background sits behind everything. It rides the
+            shake transform with the rest of the screen, which actually
+            adds to the game-over impact. */}
+        <ThemedBackground theme={theme} style={StyleSheet.absoluteFill} />
+
         <StatusBar barStyle="light-content" />
 
         {/* Score */}

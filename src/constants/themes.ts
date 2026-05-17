@@ -13,6 +13,16 @@ export type ThemeId =
   | 'monochrome'
   | 'galaxy';
 
+// Optional ambient background images (AI-generated, optimized to WebP by
+// scripts/process-theme-backgrounds.py — total ~96 KB for all five).
+// Classic + Monochrome stay flat on purpose: their minimal identity is the
+// point. require() is static so Metro bundles these unconditionally.
+const BG_SUNSET = require('../../assets/backgrounds/sunset.webp');
+const BG_OCEAN = require('../../assets/backgrounds/ocean.webp');
+const BG_FOREST = require('../../assets/backgrounds/forest.webp');
+const BG_NEON = require('../../assets/backgrounds/neon.webp');
+const BG_GALAXY = require('../../assets/backgrounds/galaxy.webp');
+
 export interface Theme {
   id: ThemeId;
   /** French display name for the picker UI. */
@@ -23,6 +33,20 @@ export interface Theme {
   blockPalette: string[];
   background: string;
   backgroundGradientEnd: string;
+  /**
+   * Optional ambient background image (require() asset ref). When set,
+   * ThemedBackground renders it cover-scaled behind a dark scrim instead
+   * of the flat `background` color. Undefined = flat color (Classic,
+   * Monochrome).
+   */
+  backgroundImage?: number;
+  /**
+   * Opacity of the dark scrim over backgroundImage. Higher = darker =
+   * better block contrast but less visible art. Sunset & Neon need a
+   * heavier scrim because their lower third (where the tower stacks) is
+   * bright. Default applied in ThemedBackground when omitted.
+   */
+  backgroundScrimOpacity?: number;
   text: string;
   textSecondary: string;
   /** Brand accent — buttons, perfect ring, score UI. */
@@ -59,6 +83,8 @@ export const THEMES: Record<ThemeId, Theme> = {
     ],
     background: '#2D1B4E',
     backgroundGradientEnd: '#0F0524',
+    backgroundImage: BG_SUNSET,
+    backgroundScrimOpacity: 0.62, // bright orange lower third
     text: '#FFF5E6',
     textSecondary: '#C8B5D9',
     accent: '#FF4E50',
@@ -75,6 +101,8 @@ export const THEMES: Record<ThemeId, Theme> = {
     ],
     background: '#001D3D',
     backgroundGradientEnd: '#000814',
+    backgroundImage: BG_OCEAN,
+    backgroundScrimOpacity: 0.42, // already very dark
     text: '#CAF0F8',
     textSecondary: '#A2D6F9',
     accent: '#48CAE4',
@@ -91,6 +119,8 @@ export const THEMES: Record<ThemeId, Theme> = {
     ],
     background: '#1B2D1F',
     backgroundGradientEnd: '#081C15',
+    backgroundImage: BG_FOREST,
+    backgroundScrimOpacity: 0.45,
     text: '#F1F8F0',
     textSecondary: '#B7CFA9',
     accent: '#95D5B2',
@@ -107,6 +137,8 @@ export const THEMES: Record<ThemeId, Theme> = {
     ],
     background: '#0A0014',
     backgroundGradientEnd: '#000000',
+    backgroundImage: BG_NEON,
+    backgroundScrimOpacity: 0.6, // bright neon grid at the bottom
     text: '#FFFFFF',
     textSecondary: '#B388EB',
     accent: '#FF006E',
@@ -139,6 +171,8 @@ export const THEMES: Record<ThemeId, Theme> = {
     ],
     background: '#10002B',
     backgroundGradientEnd: '#000000',
+    backgroundImage: BG_GALAXY,
+    backgroundScrimOpacity: 0.4, // dark nebula, keep it visible
     text: '#E0AAFF',
     textSecondary: '#9D4EDD',
     accent: '#F72585',

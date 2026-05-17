@@ -41,6 +41,11 @@ google-service-account.json
 *.apk
 *.ipa
 
+# Raw AI-generated source art (~10 MB). Optimized outputs live in
+# assets/backgrounds + assets/marketing; regenerate via
+# scripts/process-theme-backgrounds.py. Keep sources local only.
+Images generees/
+
 # typescript
 *.tsbuildinfo
 

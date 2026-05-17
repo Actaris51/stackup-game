@@ -4,6 +4,7 @@ import * as Application from 'expo-application';
 import { COLORS, type Difficulty, type Theme } from '../constants';
 import { getHighScoreForMode } from '../utils/storage';
 import { isGameCenterAvailable, showGameCenter } from '../utils/gameCenter';
+import { ThemedBackground } from '../components/ThemedBackground';
 
 interface HomeScreenProps {
   theme: Theme;
@@ -35,7 +36,7 @@ export function HomeScreen({
     Application.nativeApplicationVersion ?? '1.1.2';
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
+    <ThemedBackground theme={theme} style={styles.container}>
       <View style={styles.titleContainer}>
         <Text style={[styles.title, { color: theme.text }]}>STACK</Text>
         <Text style={[styles.titleAccent, { color: theme.accent }]}>UP</Text>
@@ -121,7 +122,7 @@ export function HomeScreen({
       <Text style={[styles.versionText, { color: theme.textSecondary }]}>
         v{appVersion}
       </Text>
-    </View>
+    </ThemedBackground>
   );
 }
 
