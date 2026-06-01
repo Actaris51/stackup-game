@@ -43,51 +43,67 @@ const PROD_AD_IDS = {
   }) as string,
 };
 
-// Decide at module load whether to use test ads.
-// - In __DEV__ (local dev, Expo Go): always test ads.
-// - On iOS, expo-application exposes the release type. TestFlight, simulator,
-//   enterprise and ad-hoc all get test ads. Only `appStore` uses real ads.
-// - On Android there's no equivalent release-type API, so we use real ads
-//   (Android test distribution uses the internal-testing track instead).
-function shouldUseTestAds(): boolean {
-  if (__DEV__) return true;
-  if (Platform.OS === 'ios') {
-    // ApplicationReleaseType: 0=unknown, 1=simulator, 2=enterprise,
-    // 3=development, 4=adHoc, 5=appStore. Available since expo-application
-    // 5.x. Be defensive: if the property is absent (older SDK or web), we
-    // default to PROD ads — but only when we can also positively confirm
-    // we're on a real iOS build (release channel populated, etc.).
-    const appCompat = Application as unknown as {
-      iosApplicationReleaseType?: number;
-      applicationReleaseType?: number;
-    };
-    const type = appCompat.iosApplicationReleaseType ?? appCompat.applicationReleaseType;
-    if (typeof type === 'number') {
-      if (type !== 5) return true;
-    } else {
-      // Property genuinely missing — treat as suspicious and serve TEST ads
-      // to avoid serving real ads to ourselves (TestFlight, simulator…).
-      // The cost of misclassifying an App Store install as test is one user
-      // who sees Google's filler ad for one session; the inverse risk is
-      // an AdMob ban for invalid traffic. We pick the safer side.
-      console.log('[Ads] iosApplicationReleaseType missing — defaulting to TEST ads');
-      return true;
-    }
+// Decide whether to use test ads. This MUST be async on iOS: expo-application
+// exposes the release type ONLY via getIosApplicationReleaseTypeAsync() — there
+// is NO synchronous `iosApplicationReleaseType` property. The previous code read
+// a property that never existed, so `type` was ALWAYS undefined → it ALWAYS fell
+// back to TEST ads, even on the live App Store build → zero ad revenue for every
+// real user. Verified against node_modules/expo-application/build/Application.d.ts
+// (June 2026): the only iOS release-type API is the async function.
+//
+// - __DEV__ (local dev, Expo Go): always test ads.
+// - iOS: real ads ONLY when release type === APP_STORE (5). TestFlight, simulator,
+//   enterprise and ad-hoc → test ads.
+// - Android: no release-type API → real ads (test distribution uses the
+//   internal-testing track with its own config).
+const IOS_APP_STORE_RELEASE_TYPE = 5; // ApplicationReleaseType.APP_STORE
+
+// Safe synchronous default until the async iOS check resolves: serve TEST ads so
+// we never accidentally serve (and get AdMob-flagged for) real ads to ourselves
+// before confirming this is a real App Store install. Android is known
+// synchronously (no async API) so it takes its final value immediately.
+let useTestAds = __DEV__ ? true : Platform.OS === 'ios';
+let adModeResolved = __DEV__ || Platform.OS !== 'ios';
+
+/**
+ * Resolve the iOS test-vs-prod ad decision via the async release-type API.
+ * Idempotent and cheap after the first call. Called at the top of
+ * initializeAds(), which every showInterstitial()/showRewarded() awaits — so
+ * the ad-unit IDs below are always read AFTER this resolves.
+ */
+async function resolveAdModeIfNeeded(): Promise<void> {
+  if (adModeResolved) return;
+  try {
+    const type = await Application.getIosApplicationReleaseTypeAsync();
+    useTestAds = type !== IOS_APP_STORE_RELEASE_TYPE;
+    console.log(
+      `[Ads] iOS release type=${type} → serving ${useTestAds ? 'TEST' : 'PROD'} ads`
+    );
+  } catch (e) {
+    // Couldn't determine the release type — keep the safe default (test ads).
+    useTestAds = true;
+    console.log('[Ads] release-type lookup failed — defaulting to TEST ads', e);
   }
-  return false;
+  adModeResolved = true;
 }
 
-const USE_TEST_ADS = shouldUseTestAds();
-const ACTIVE_IDS = USE_TEST_ADS ? TEST_AD_IDS : PROD_AD_IDS;
-
-if (USE_TEST_ADS) {
-  console.log('[Ads] Using Google TEST ad unit IDs (non-App-Store build)');
+function activeAdUnitIds() {
+  return useTestAds ? TEST_AD_IDS : PROD_AD_IDS;
 }
 
 export const AD_CONFIG = {
-  INTERSTITIAL_ID: ACTIVE_IDS.INTERSTITIAL,
-  REWARDED_ID: ACTIVE_IDS.REWARDED,
-  BANNER_ID: ACTIVE_IDS.BANNER,
+  // Ad-unit IDs are resolved lazily AFTER the async release-type check (see
+  // resolveAdModeIfNeeded), so these getters always reflect the final TEST/PROD
+  // decision rather than the pre-resolution default.
+  get INTERSTITIAL_ID() {
+    return activeAdUnitIds().INTERSTITIAL;
+  },
+  get REWARDED_ID() {
+    return activeAdUnitIds().REWARDED;
+  },
+  get BANNER_ID() {
+    return activeAdUnitIds().BANNER;
+  },
   INTERSTITIAL_FREQUENCY: 3,
 };
 
@@ -187,6 +203,10 @@ export async function initializeAds(): Promise<void> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
+    // Resolve test-vs-prod ad mode FIRST (async iOS release-type lookup) so the
+    // ad-unit IDs picked by showInterstitial/showRewarded below are correct.
+    await resolveAdModeIfNeeded();
+
     // ATT must already have been requested by the caller via
     // requestATTPermissionIfNeeded(). We don't request here to avoid
     // racing with other system UI (e.g. Game Center auth).
