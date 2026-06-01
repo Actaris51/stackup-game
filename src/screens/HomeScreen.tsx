@@ -33,7 +33,7 @@ export function HomeScreen({
   // Expo bakes the version from app.json into Application.nativeApplicationVersion
   // on native, and falls back to the JS-known version otherwise.
   const appVersion =
-    Application.nativeApplicationVersion ?? '1.1.2';
+    Application.nativeApplicationVersion ?? '1.1.3';
 
   return (
     <ThemedBackground theme={theme} style={styles.container}>
@@ -49,17 +49,18 @@ export function HomeScreen({
       {/* Active mode chip — single source of access to Customize. The old
           layout had this chip *and* a redundant secondary button at the
           bottom; both routed to the same screen. Kept the chip because
-          it doubles as an at-a-glance status indicator. */}
+          it doubles as an at-a-glance status indicator. Made it visually
+          distinct (solid accent bg + white text) so it's clearly interactive. */}
       <TouchableOpacity
         onPress={onCustomize}
         activeOpacity={0.7}
-        style={[styles.modeChip, { borderColor: theme.accent }]}
-        hitSlop={6}
+        style={[styles.modeChip, { backgroundColor: theme.accent }]}
+        hitSlop={8}
       >
-        <Text style={[styles.modeChipLabel, { color: theme.textSecondary }]}>
+        <Text style={[styles.modeChipLabel, { color: '#fff' }]}>
           MODE
         </Text>
-        <Text style={[styles.modeChipValue, { color: theme.accent }]}>
+        <Text style={[styles.modeChipValue, { color: '#fff' }]}>
           {difficulty.name.toUpperCase()}
         </Text>
       </TouchableOpacity>

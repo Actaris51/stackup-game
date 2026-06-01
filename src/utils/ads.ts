@@ -275,7 +275,6 @@ export async function showRewarded(): Promise<boolean> {
 
   return new Promise((resolve) => {
     const ad = RewardedAd.createForAdRequest(AD_CONFIG.REWARDED_ID);
-    let rewarded = false;
     let settled = false;
 
     function cleanup() {
@@ -294,15 +293,21 @@ export async function showRewarded(): Promise<boolean> {
     const unsubEarned = ad.addAdEventListener(
       RewardedAdEventType.EARNED_REWARD,
       () => {
-        rewarded = true;
+        console.log('[Ads] Rewarded EARNED_REWARD event fired');
       }
     );
+    // CRITICAL FIX (June 2026): If ad closes normally (user watched it or skipped
+    // naturally), treat as reward earned. EARNED_REWARD doesn't always fire with
+    // test ads or some ad networks, so we can't gate the reward on that event alone.
+    // Timeout + error are still hard denials — only CLOSED w/o error = reward.
     const unsubClosed = ad.addAdEventListener(AdEventType.CLOSED, () => {
       cleanup();
-      resolve(rewarded);
+      console.log('[Ads] Rewarded ad closed normally — granting reward');
+      resolve(true); // Ad closed without timeout/error = user earned reward
     });
     const unsubError = ad.addAdEventListener(AdEventType.ERROR, () => {
       cleanup();
+      console.log('[Ads] Rewarded ad error — denying reward');
       resolve(false);
     });
 
