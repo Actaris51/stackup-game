@@ -322,7 +322,7 @@
     ],
     "owner": "actaris51",
     "runtimeVersion": {
-      "policy": "fingerprint"
+      "policy": "appVersion"
     },
     "updates": {
       "url": "https://u.expo.dev/6a0e8530-a767-4a61-9963-9b113d1ec05d",
