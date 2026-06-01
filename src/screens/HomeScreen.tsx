@@ -33,7 +33,7 @@ export function HomeScreen({
   // Expo bakes the version from app.json into Application.nativeApplicationVersion
   // on native, and falls back to the JS-known version otherwise.
   const appVersion =
-    Application.nativeApplicationVersion ?? '1.1.3';
+    Application.nativeApplicationVersion ?? '1.1.4';
 
   return (
     <ThemedBackground theme={theme} style={styles.container}>
