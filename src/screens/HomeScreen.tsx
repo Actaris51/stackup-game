@@ -58,12 +58,16 @@ export function HomeScreen({
         hitSlop={8}
       >
         <Text style={[styles.modeChipLabel, { color: '#fff' }]}>
-          MODE
+          ⚙️ MODE
         </Text>
         <Text style={[styles.modeChipValue, { color: '#fff' }]}>
           {difficulty.name.toUpperCase()}
         </Text>
+        <Text style={[styles.modeChipChevron, { color: '#fff' }]}>›</Text>
       </TouchableOpacity>
+      <Text style={[styles.modeHint, { color: theme.textSecondary }]}>
+        Appuie pour changer de mode et de thème
+      </Text>
 
       <TouchableOpacity
         style={[
@@ -157,11 +161,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 18,
-    borderWidth: 1,
-    marginBottom: 28,
+    marginBottom: 8,
   },
   modeChipLabel: {
     fontSize: 10,
@@ -172,6 +175,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 2,
+  },
+  modeChipChevron: {
+    fontSize: 18,
+    fontWeight: '900',
+    marginLeft: 2,
+    marginTop: -2,
+  },
+  modeHint: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+    marginBottom: 24,
+    opacity: 0.8,
   },
   playButton: {
     paddingHorizontal: 60,

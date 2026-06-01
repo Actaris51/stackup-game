@@ -295,49 +295,75 @@ export async function showRewarded(): Promise<boolean> {
 
   return new Promise((resolve) => {
     const ad = RewardedAd.createForAdRequest(AD_CONFIG.REWARDED_ID);
+    let earned = false;
+    let opened = false;
     let settled = false;
+    let loadTimer: ReturnType<typeof setTimeout> | null = null;
+    let watchTimer: ReturnType<typeof setTimeout> | null = null;
 
-    function cleanup() {
+    function settle(result: boolean) {
       if (settled) return;
       settled = true;
       unsubLoaded();
       unsubEarned();
+      unsubOpened();
       unsubClosed();
       unsubError();
-      clearTimeout(timer);
+      if (loadTimer) clearTimeout(loadTimer);
+      if (watchTimer) clearTimeout(watchTimer);
+      resolve(result);
     }
 
     const unsubLoaded = ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
       ad.show();
     });
+
+    // OPENED = the ad is now full-screen.
+    //
+    // 🔴 ROOT CAUSE of the "reward never granted / Continue loops endlessly"
+    // bug (live since v1.1.2): there used to be a single 8s timeout that
+    // resolved this promise to `false` and tore down the listeners. But a
+    // rewarded video runs 15-30s and the user MUST watch to the end to earn
+    // the reward — so the timeout fired MID-AD, denied the reward, and the
+    // later EARNED_REWARD / CLOSED events were ignored. The game never resumed
+    // and the player could re-launch the ad forever. The earlier "resolve true
+    // on CLOSED" patch didn't help because the timeout already resolved false
+    // first. Fix: only the LOAD phase is time-boxed; the instant the ad is on
+    // screen we cancel that timer and wait for the real CLOSED event.
+    const unsubOpened = ad.addAdEventListener(AdEventType.OPENED, () => {
+      opened = true;
+      if (loadTimer) {
+        clearTimeout(loadTimer);
+        loadTimer = null;
+      }
+      // Long backstop purely to avoid a leaked promise if CLOSED never arrives.
+      watchTimer = setTimeout(() => settle(earned || opened), 120000);
+    });
+
     const unsubEarned = ad.addAdEventListener(
       RewardedAdEventType.EARNED_REWARD,
       () => {
-        console.log('[Ads] Rewarded EARNED_REWARD event fired');
+        earned = true;
       }
     );
-    // CRITICAL FIX (June 2026): If ad closes normally (user watched it or skipped
-    // naturally), treat as reward earned. EARNED_REWARD doesn't always fire with
-    // test ads or some ad networks, so we can't gate the reward on that event alone.
-    // Timeout + error are still hard denials — only CLOSED w/o error = reward.
+
+    // Grant on close if the SDK reported the reward; fall back to "the ad was
+    // shown" since some mediated networks don't reliably emit EARNED_REWARD.
+    // The continue is gated to once per game (hasContinued), so this is low
+    // risk and never traps the player in the old loop again.
     const unsubClosed = ad.addAdEventListener(AdEventType.CLOSED, () => {
-      cleanup();
-      console.log('[Ads] Rewarded ad closed normally — granting reward');
-      resolve(true); // Ad closed without timeout/error = user earned reward
-    });
-    const unsubError = ad.addAdEventListener(AdEventType.ERROR, () => {
-      cleanup();
-      console.log('[Ads] Rewarded ad error — denying reward');
-      resolve(false);
+      settle(earned || opened);
     });
 
-    // Same timeout safety net as interstitials. Rewarded ads have stricter
-    // expected response (the user wants a reward), so failing fast = OK.
-    const timer = setTimeout(() => {
-      console.log('[Ads] Rewarded timed out, denying reward');
-      cleanup();
-      resolve(false);
-    }, AD_TIMEOUT_MS);
+    const unsubError = ad.addAdEventListener(AdEventType.ERROR, () => {
+      settle(false);
+    });
+
+    // Guards ONLY the load phase: if nothing loads/opens within 10s, give up so
+    // the player isn't left waiting on the Game Over screen.
+    loadTimer = setTimeout(() => {
+      if (!opened) settle(false);
+    }, 10000);
 
     ad.load();
   });
