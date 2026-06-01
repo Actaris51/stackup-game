@@ -271,20 +271,21 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
     }
   }, [paused, started, gameData.state, startGame, tap]);
 
-  const handleRestart = useCallback(async () => {
-    // Note: incrementGamesPlayed + Game Center submission already happened in
-    // the game-over useEffect above. Here we just decide whether to show an
-    // interstitial based on the games-played count.
+  const handleRestart = useCallback(() => {
+    // Reset the game IMMEDIATELY and synchronously. The restart must NEVER be
+    // gated on the interstitial's lifecycle.
     //
-    // Guard against back-to-back ads: if the player already watched a rewarded
-    // ad in this session via "Continue", suppress the next interstitial. Two
-    // ads in quick succession (rewarded → die → restart → interstitial) feels
-    // punishing and is the most common "why is there an ad now?" UX complaint.
-    const gamesPlayed = await getGamesPlayed();
-    const onCadence = gamesPlayed % AD_CONFIG.INTERSTITIAL_FREQUENCY === 0;
-    if (onCadence && !hasContinued) {
-      await showInterstitial();
-    }
+    // v1.1.4 bug: this used to `await showInterstitial()` BEFORE reset(). With
+    // real (non-test) interstitials, the `CLOSED` event can be slow or — in some
+    // mediation paths — never reach JS, so the awaited promise didn't resolve and
+    // reset() never ran. The player was left frozen on Game Over after dismissing
+    // the ad ("une pub s'affiche, puis bloqué après"). Test ads masked this
+    // because they closed cleanly. Decoupling the reset from the ad fixes it for
+    // good — even if the ad hangs or throws, the game is already playable again.
+    //
+    // Note: incrementGamesPlayed + Game Center submission already happened in the
+    // game-over useEffect above.
+    const wasContinued = hasContinued;
     setFallingPieces([]);
     setScorePopups([]);
     setPerfectEffects([]);
@@ -294,6 +295,23 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
     reset();
     setStarted(false);
     setHasContinued(false);
+
+    // Show the interstitial on cadence WITHOUT blocking the restart. Suppress it
+    // right after a rewarded "Continue" so the player never gets two ads back to
+    // back (rewarded → die → restart → interstitial feels punishing). Fire-and-
+    // forget: any failure is non-fatal and can no longer freeze the game.
+    if (!wasContinued) {
+      (async () => {
+        try {
+          const gamesPlayed = await getGamesPlayed();
+          if (gamesPlayed % AD_CONFIG.INTERSTITIAL_FREQUENCY === 0) {
+            await showInterstitial();
+          }
+        } catch (e) {
+          console.log('[GameOver] interstitial failed (non-fatal)', e);
+        }
+      })();
+    }
   }, [reset, hasContinued]);
 
   // --- Pause handlers ---
