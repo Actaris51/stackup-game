@@ -249,8 +249,6 @@ export async function initializeAds(): Promise<void> {
   return initPromise;
 }
 
-const AD_TIMEOUT_MS = 8000;
-
 export async function showInterstitial(): Promise<void> {
   if (!isNative || !InterstitialAd) {
     console.log('[Ads] Interstitial skipped (web)');
@@ -260,28 +258,50 @@ export async function showInterstitial(): Promise<void> {
 
   return new Promise((resolve) => {
     const ad = InterstitialAd.createForAdRequest(AD_CONFIG.INTERSTITIAL_ID);
+    let opened = false;
     let settled = false;
+    let loadTimer: ReturnType<typeof setTimeout> | null = null;
+    let watchTimer: ReturnType<typeof setTimeout> | null = null;
+
     const settle = () => {
       if (settled) return;
       settled = true;
       unsubLoaded();
+      unsubOpened();
       unsubClosed();
       unsubError();
-      clearTimeout(timer);
+      if (loadTimer) clearTimeout(loadTimer);
+      if (watchTimer) clearTimeout(watchTimer);
       resolve();
     };
+
     const unsubLoaded = ad.addAdEventListener(AdEventType.LOADED, () => {
       ad.show();
     });
+    // OPENED = the ad is full-screen. Cancel the LOAD timeout — same lesson as
+    // the rewarded ad: never resolve while the ad is still on screen, or the
+    // caller (restart) tears down too early. Once shown we wait for the real
+    // CLOSED; the watch backstop only prevents a leaked promise.
+    const unsubOpened = ad.addAdEventListener(AdEventType.OPENED, () => {
+      opened = true;
+      if (loadTimer) {
+        clearTimeout(loadTimer);
+        loadTimer = null;
+      }
+      watchTimer = setTimeout(settle, 30000);
+    });
     const unsubClosed = ad.addAdEventListener(AdEventType.CLOSED, settle);
     const unsubError = ad.addAdEventListener(AdEventType.ERROR, settle);
-    // Hard timeout: if the SDK fires neither LOADED→CLOSED nor ERROR
-    // (corner-case network failures we've seen in the wild), the player
-    // would be stuck on Game Over forever waiting for the await to return.
-    const timer = setTimeout(() => {
-      console.log('[Ads] Interstitial timed out, unblocking player');
-      settle();
-    }, AD_TIMEOUT_MS);
+
+    // Guards ONLY the load phase: if nothing loads/opens within 10s, unblock
+    // the caller so the player isn't stuck on Game Over.
+    loadTimer = setTimeout(() => {
+      if (!opened) {
+        console.log('[Ads] Interstitial failed to load in time, unblocking');
+        settle();
+      }
+    }, 10000);
+
     ad.load();
   });
 }
