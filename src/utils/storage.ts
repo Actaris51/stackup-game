@@ -29,6 +29,8 @@ const ONBOARDING_SEEN_KEY = 'stackup_onboarding_seen'; // first-run tutorial fla
 const AD_UNLOCKS_KEY = 'stackup_ad_unlocks'; // unlock-rule ids granted via rewarded ad
 const DAILY_CHALLENGE_LAST_KEY = 'stackup_daily_challenge_last'; // YYYY-MM-DD of last completed daily run
 const DAILY_CHALLENGE_SCORE_KEY = 'stackup_daily_challenge_score'; // score achieved on that day
+const ADS_REMOVED_KEY = 'stackup_ads_removed'; // "Remove Ads" IAP owned (non-consumable)
+const NOTIF_ASKED_KEY = 'stackup_notif_asked'; // contextual notification permission already requested
 
 /**
  * Sequencer for read-modify-write critical sections on AsyncStorage.
@@ -253,6 +255,38 @@ export async function recordDailyChallengeScore(score: number): Promise<void> {
       [DAILY_CHALLENGE_SCORE_KEY, String(score)],
     ]);
   });
+}
+
+// --- v1.2: "Remove Ads" IAP entitlement flag ---
+// Written by utils/purchases.ts (purchase, restore, silent sync). Read by
+// utils/ads.ts to skip interstitials. Rewarded ads are NOT gated: they are
+// player-initiated value exchanges (Continue, theme unlock) and stay
+// available to buyers.
+export async function isAdsRemoved(): Promise<boolean> {
+  return (await AsyncStorage.getItem(ADS_REMOVED_KEY)) === '1';
+}
+
+export async function setAdsRemoved(removed: boolean): Promise<void> {
+  if (removed) {
+    await AsyncStorage.setItem(ADS_REMOVED_KEY, '1');
+  } else {
+    await AsyncStorage.removeItem(ADS_REMOVED_KEY);
+  }
+}
+
+// --- v1.2: contextual notification-permission ask (once ever) ---
+export async function isNotifPermissionAsked(): Promise<boolean> {
+  return (await AsyncStorage.getItem(NOTIF_ASKED_KEY)) === '1';
+}
+
+export async function markNotifPermissionAsked(): Promise<void> {
+  await AsyncStorage.setItem(NOTIF_ASKED_KEY, '1');
+}
+
+/** True if the daily streak was already ticked today (app opened today). */
+export async function hasPlayedStreakToday(): Promise<boolean> {
+  const last = await AsyncStorage.getItem(DAILY_STREAK_LAST_KEY);
+  return last === todayLocalISO();
 }
 
 // --- v1.1.2: daily play streak ---

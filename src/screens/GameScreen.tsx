@@ -58,6 +58,7 @@ import {
   playComboSound,
   playGameOverSound,
 } from '../utils/sounds';
+import { maybeAskNotificationPermissionAfterGame } from '../utils/notifications';
 
 interface GameScreenProps {
   onHome: () => void;
@@ -158,6 +159,10 @@ export function GameScreen({ onHome, theme, difficulty, isDaily, dailyLabel }: G
           const gamesPlayed = await incrementGamesPlayed();
           const totalBlocks = await addBlocksToTotal(blocksPlaced);
           const maxPerfectStreak = await updateMaxPerfectStreak(maxStreakInGame);
+
+          // Contextual notification-permission ask (3rd game, once ever).
+          // Fire-and-forget: the system dialog must never block this chain.
+          maybeAskNotificationPermissionAfterGame(gamesPlayed).catch(() => {});
 
           // Surface cumulative stats in the game-over modal for engagement.
           setCumulativeStats({ gamesPlayed, totalBlocks, maxPerfectStreak });

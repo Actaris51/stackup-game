@@ -1,6 +1,7 @@
 import { AppState, Platform } from 'react-native';
 import * as Application from 'expo-application';
 import * as TrackingTransparency from 'expo-tracking-transparency';
+import { isAdsRemoved } from './storage';
 
 // Google's official test ad unit IDs — always serve fake test ads.
 // Used in TestFlight and non-App-Store builds so reviewers can verify
@@ -254,6 +255,15 @@ export async function showInterstitial(): Promise<void> {
     console.log('[Ads] Interstitial skipped (web)');
     return;
   }
+  // "Remove Ads" IAP: interstitials are the ONLY thing the purchase removes.
+  // Rewarded ads (Continue, theme unlock) are player-initiated benefits and
+  // deliberately keep working for buyers.
+  try {
+    if (await isAdsRemoved()) {
+      console.log('[Ads] Interstitial skipped (Remove Ads purchased)');
+      return;
+    }
+  } catch {}
   await initializeAds();
 
   return new Promise((resolve) => {

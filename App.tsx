@@ -21,6 +21,8 @@ import {
   tickDailyStreak,
 } from './src/utils/storage';
 import { initSounds } from './src/utils/sounds';
+import { initPurchases } from './src/utils/purchases';
+import { installStreakReminderScheduler } from './src/utils/notifications';
 import { getDailyChallenge, type DailyChallenge } from './src/utils/dailyChallenge';
 import {
   DEFAULT_DIFFICULTY_ID,
@@ -89,6 +91,12 @@ export default function App() {
       authenticateGameCenter();
       // Re-auth when the user comes back from Settings (could've signed out).
       installGameCenterAppStateListener();
+      // StoreKit: connect, catch pending transactions, silent entitlement
+      // re-sync. Fire-and-forget — never blocks startup.
+      initPurchases();
+      // Streak reminder scheduler (permission is asked contextually later,
+      // NEVER here — it would race the ATT prompt, cf. the 2.1 rejection).
+      installStreakReminderScheduler();
     })();
   }, []);
 

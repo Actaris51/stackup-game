@@ -1,8 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import * as Application from 'expo-application';
 import { COLORS, type Difficulty, type Theme } from '../constants';
-import { getDailyChallengeStatus, getHighScoreForMode } from '../utils/storage';
+import {
+  getDailyChallengeStatus,
+  getHighScoreForMode,
+  isAdsRemoved,
+} from '../utils/storage';
+import {
+  getRemoveAdsProduct,
+  purchaseRemoveAds,
+  restoreRemoveAds,
+} from '../utils/purchases';
 import {
   isGameCenterAvailable,
   showGameCenter,
@@ -41,6 +50,11 @@ export function HomeScreen({
   const [showGameCenterButton, setShowGameCenterButton] = useState(false);
   // null until loaded — the card doesn't render before that (no flicker).
   const [daily, setDaily] = useState<DailyCardState | null>(null);
+  // Remove Ads IAP. The buy button only renders when the product loaded
+  // (hides itself on web, in Expo Go, and until the ASC product exists).
+  const [adsRemoved, setAdsRemovedState] = useState(true); // pessimistic: no flash of the buy button
+  const [removeAdsPrice, setRemoveAdsPrice] = useState<string | null>(null);
+  const [purchaseBusy, setPurchaseBusy] = useState(false);
 
   useEffect(() => {
     getHighScoreForMode(difficulty.id).then(setModeBest).catch(() => {});
@@ -61,10 +75,59 @@ export function HomeScreen({
     })();
   }, []);
 
+  // Remove Ads IAP state — entitlement flag + localized price.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const removed = await isAdsRemoved();
+        if (!mounted) return;
+        setAdsRemovedState(removed);
+        if (!removed) {
+          const product = await getRemoveAdsProduct();
+          if (mounted && product) setRemoveAdsPrice(product.displayPrice);
+        }
+      } catch {}
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleBuyRemoveAds = useCallback(async () => {
+    if (purchaseBusy) return;
+    setPurchaseBusy(true);
+    try {
+      const owned = await purchaseRemoveAds();
+      if (owned) {
+        setAdsRemovedState(true);
+        Alert.alert('Merci ! 🎉', 'Les pubs entre les parties sont désactivées.');
+      }
+    } finally {
+      setPurchaseBusy(false);
+    }
+  }, [purchaseBusy]);
+
+  const handleRestorePurchases = useCallback(async () => {
+    if (purchaseBusy) return;
+    setPurchaseBusy(true);
+    try {
+      const owned = await restoreRemoveAds();
+      if (owned) {
+        setAdsRemovedState(true);
+        Alert.alert('Achat restauré ✓', 'Les pubs entre les parties sont désactivées.');
+      } else {
+        Alert.alert('Aucun achat trouvé', "Aucun achat à restaurer sur ce compte App Store.");
+      }
+    } finally {
+      setPurchaseBusy(false);
+    }
+  }, [purchaseBusy]);
+
   // Expo bakes the version from app.json into Application.nativeApplicationVersion
   // on native, and falls back to the JS-known version otherwise.
   const appVersion =
-    Application.nativeApplicationVersion ?? '1.1.4';
+    Application.nativeApplicationVersion ?? '1.2.0';
 
   return (
     <ThemedBackground theme={theme} style={styles.container}>
@@ -185,6 +248,35 @@ export function HomeScreen({
               🏆 CLASSEMENTS
             </Text>
           </TouchableOpacity>
+        )}
+
+        {/* Remove Ads IAP — renders only when the StoreKit product loaded
+            (never on web/Expo Go, nor before the ASC product exists). The
+            restore link satisfies Apple's visible-restore requirement. */}
+        {!adsRemoved && removeAdsPrice && (
+          <>
+            <TouchableOpacity
+              style={[styles.secondaryButton, { borderColor: theme.accent }]}
+              onPress={handleBuyRemoveAds}
+              disabled={purchaseBusy}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.secondaryButtonText, { color: theme.accent }]}>
+                {purchaseBusy
+                  ? '⏳ …'
+                  : `🚫 SUPPRIMER LES PUBS — ${removeAdsPrice}`}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleRestorePurchases}
+              disabled={purchaseBusy}
+              hitSlop={8}
+            >
+              <Text style={[styles.restoreLink, { color: theme.textSecondary }]}>
+                Restaurer mes achats
+              </Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
 
@@ -351,6 +443,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 2,
+  },
+  restoreLink: {
+    fontSize: 11,
+    fontWeight: '500',
+    textDecorationLine: 'underline',
+    opacity: 0.8,
   },
   versionText: {
     position: 'absolute',
