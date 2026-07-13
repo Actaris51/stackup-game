@@ -25,6 +25,11 @@ const DAILY_STREAK_KEY = 'stackup_daily_streak';      // consecutive-day count
 const DAILY_STREAK_LAST_KEY = 'stackup_daily_streak_last'; // YYYY-MM-DD of last play day
 const ONBOARDING_SEEN_KEY = 'stackup_onboarding_seen'; // first-run tutorial flag
 
+// v1.2 keys:
+const AD_UNLOCKS_KEY = 'stackup_ad_unlocks'; // unlock-rule ids granted via rewarded ad
+const DAILY_CHALLENGE_LAST_KEY = 'stackup_daily_challenge_last'; // YYYY-MM-DD of last completed daily run
+const DAILY_CHALLENGE_SCORE_KEY = 'stackup_daily_challenge_score'; // score achieved on that day
+
 /**
  * Sequencer for read-modify-write critical sections on AsyncStorage.
  * Without this, two near-simultaneous game-overs (rare but possible in
@@ -200,6 +205,56 @@ export async function markUnlocksSeen(unlockIds: string[]): Promise<void> {
   }
 }
 
+// --- v1.2: ad-granted unlocks (rewarded "unlock now" on locked themes) ---
+// Stored as unlock-rule ids (e.g. "theme:galaxy") so they compose directly
+// with the UNLOCK_RULES system: a theme is available when its rule is met
+// OR its id is in this list.
+export async function getAdUnlocks(): Promise<string[]> {
+  const raw = await AsyncStorage.getItem(AD_UNLOCKS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addAdUnlock(unlockId: string): Promise<void> {
+  return serialize(async () => {
+    const unlocks = await getAdUnlocks();
+    if (unlocks.includes(unlockId)) return;
+    unlocks.push(unlockId);
+    await AsyncStorage.setItem(AD_UNLOCKS_KEY, JSON.stringify(unlocks));
+  });
+}
+
+// --- v1.2: daily challenge (one seeded attempt per day) ---
+export async function getDailyChallengeStatus(): Promise<{
+  playedToday: boolean;
+  todayScore: number;
+}> {
+  const [last, rawScore] = await Promise.all([
+    AsyncStorage.getItem(DAILY_CHALLENGE_LAST_KEY),
+    AsyncStorage.getItem(DAILY_CHALLENGE_SCORE_KEY),
+  ]);
+  const playedToday = last === todayLocalISO();
+  return {
+    playedToday,
+    todayScore: playedToday && rawScore ? parseInt(rawScore, 10) : 0,
+  };
+}
+
+/** Marks today's attempt as consumed and stores its score. */
+export async function recordDailyChallengeScore(score: number): Promise<void> {
+  return serialize(async () => {
+    await AsyncStorage.multiSet([
+      [DAILY_CHALLENGE_LAST_KEY, todayLocalISO()],
+      [DAILY_CHALLENGE_SCORE_KEY, String(score)],
+    ]);
+  });
+}
+
 // --- v1.1.2: daily play streak ---
 // Increments by 1 if the previous play day was exactly yesterday, resets to
 // 1 on any first-play-of-day after a gap, and is a no-op if the user already
@@ -209,7 +264,7 @@ export async function markUnlocksSeen(unlockIds: string[]): Promise<void> {
 // ISO-format YYYY-MM-DD string so DST shifts or travel can't accidentally
 // break a streak (one wall-clock day always equals one streak day).
 
-function todayLocalISO(now = new Date()): string {
+export function todayLocalISO(now = new Date()): string {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');

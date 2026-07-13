@@ -33,6 +33,11 @@ interface GameOverModalProps {
    *  sibling toast at top:70 with zIndex is masked by the modal on most
    *  RN platforms — the Modal renders in its own native window). */
   banner?: ReactNode;
+  /** Daily Challenge run: one attempt per day, so no "Rejouer" — the primary
+   *  action becomes Menu. Continue (rewarded) stays: it's the single revive. */
+  isDaily?: boolean;
+  /** Opens the Game Center daily leaderboard (only passed when GC is up). */
+  onShowDailyLeaderboard?: () => void;
   onRestart: () => void;
   onContinue: () => void;
   /** Return to the home screen (for changing mode / theme via Customize). */
@@ -49,6 +54,8 @@ export function GameOverModal({
   hasContinued,
   cumulativeStats,
   banner,
+  isDaily,
+  onShowDailyLeaderboard,
   onRestart,
   onContinue,
   onHome,
@@ -56,7 +63,9 @@ export function GameOverModal({
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `J'ai fait ${score} sur StackUp (mode ${difficulty.name}). Tu peux faire mieux ?`,
+        message: isDaily
+          ? `J'ai fait ${score} au Défi du jour sur StackUp. Tu peux faire mieux ?`
+          : `J'ai fait ${score} sur StackUp (mode ${difficulty.name}). Tu peux faire mieux ?`,
       });
     } catch {}
   };
@@ -109,7 +118,9 @@ export function GameOverModal({
             </Text>
           )}
 
-          <Text style={[styles.title, { color: theme.text }]}>Game Over</Text>
+          <Text style={[styles.title, { color: theme.text }]}>
+            {isDaily ? 'Défi terminé !' : 'Game Over'}
+          </Text>
 
           <View style={[styles.modeChip, { borderColor: theme.accent }]}>
             <Text style={[styles.modeChipText, { color: theme.accent }]}>
@@ -151,13 +162,14 @@ export function GameOverModal({
             </View>
           )}
 
+          {/* Daily = one attempt: no Rejouer, Menu becomes the primary action. */}
           <TouchableOpacity
             style={[styles.button, { backgroundColor: theme.accent }]}
-            onPress={onRestart}
+            onPress={isDaily ? onHome : onRestart}
             activeOpacity={0.85}
           >
             <Text style={[styles.buttonText, { color: COLORS.buttonText }]}>
-              Rejouer
+              {isDaily ? '🏠 Menu' : 'Rejouer'}
             </Text>
           </TouchableOpacity>
 
@@ -181,15 +193,29 @@ export function GameOverModal({
           )}
 
           <View style={styles.footerRow}>
-            <TouchableOpacity
-              style={styles.footerButton}
-              onPress={onHome}
-              hitSlop={8}
-            >
-              <Text style={[styles.footerText, { color: theme.textSecondary }]}>
-                🏠 Menu
-              </Text>
-            </TouchableOpacity>
+            {isDaily ? (
+              onShowDailyLeaderboard && (
+                <TouchableOpacity
+                  style={styles.footerButton}
+                  onPress={onShowDailyLeaderboard}
+                  hitSlop={8}
+                >
+                  <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+                    🏆 Classement
+                  </Text>
+                </TouchableOpacity>
+              )
+            ) : (
+              <TouchableOpacity
+                style={styles.footerButton}
+                onPress={onHome}
+                hitSlop={8}
+              >
+                <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+                  🏠 Menu
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.footerButton}
               onPress={handleShare}

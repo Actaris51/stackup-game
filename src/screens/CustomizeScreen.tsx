@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -20,11 +20,15 @@ import {
   type ThemeId,
 } from '../constants';
 import {
+  addAdUnlock,
+  getAdUnlocks,
   getCompetitiveBestScore,
   getGamesPlayed,
   getTotalBlocks,
+  markUnlocksSeen,
 } from '../utils/storage';
 import { getUnlockedDifficultyIds, getUnlockedThemeIds } from '../constants';
+import { showRewarded } from '../utils/ads';
 
 interface CustomizeScreenProps {
   theme: Theme;
@@ -61,20 +65,56 @@ export function CustomizeScreen({
     totalBlocks: 0,
     gamesPlayed: 0,
   });
+  // Theme currently being unlocked via rewarded ad (blocks concurrent taps).
+  const [unlockingThemeId, setUnlockingThemeId] = useState<ThemeId | null>(null);
 
   useEffect(() => {
     (async () => {
-      const [bestScore, totalBlocks, gamesPlayed] = await Promise.all([
+      const [bestScore, totalBlocks, gamesPlayed, adUnlocks] = await Promise.all([
         getCompetitiveBestScore(),
         getTotalBlocks(),
         getGamesPlayed(),
+        getAdUnlocks(),
       ]);
       const state = { bestScore, totalBlocks, gamesPlayed };
       setProgress(state);
-      setUnlockedThemes(new Set(getUnlockedThemeIds(state)));
+      // Themes: milestone-based unlocks ∪ ad-granted unlocks.
+      const themeIds = new Set(getUnlockedThemeIds(state));
+      for (const uid of adUnlocks) {
+        if (uid.startsWith('theme:')) {
+          themeIds.add(uid.slice('theme:'.length) as ThemeId);
+        }
+      }
+      setUnlockedThemes(themeIds);
       setUnlockedDifficulties(new Set(getUnlockedDifficultyIds(state)));
     })();
   }, []);
+
+  // Rewarded "unlock now" for cosmetic themes only — difficulty modes stay
+  // milestone-gated so progression keeps its meaning. On success the theme is
+  // persisted as unlocked, marked seen (no redundant toast when the milestone
+  // is later reached naturally), and activated immediately.
+  const handleAdUnlockTheme = useCallback(
+    async (id: ThemeId) => {
+      if (unlockingThemeId) return;
+      setUnlockingThemeId(id);
+      try {
+        const watched = await showRewarded();
+        if (watched) {
+          const unlockId = `theme:${id}`;
+          await addAdUnlock(unlockId);
+          await markUnlocksSeen([unlockId]);
+          setUnlockedThemes((prev) => new Set([...prev, id]));
+          onChangeTheme(id);
+        }
+      } catch (e) {
+        console.log('[Customize] ad unlock failed (non-fatal)', e);
+      } finally {
+        setUnlockingThemeId(null);
+      }
+    },
+    [unlockingThemeId, onChangeTheme]
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -112,6 +152,9 @@ export function CustomizeScreen({
                 textColor={theme.text}
                 textSecondary={theme.textSecondary}
                 onPress={() => unlocked && onChangeTheme(id)}
+                onAdUnlock={() => handleAdUnlockTheme(id)}
+                adUnlockBusy={unlockingThemeId === id}
+                adUnlockDisabled={unlockingThemeId !== null}
               />
             );
           })}
@@ -169,6 +212,12 @@ interface ThemeCardProps {
   textColor: string;
   textSecondary: string;
   onPress: () => void;
+  /** Rewarded-ad shortcut: unlock this theme right now by watching an ad. */
+  onAdUnlock?: () => void;
+  /** True while THIS card's rewarded ad is loading/showing. */
+  adUnlockBusy?: boolean;
+  /** True while ANY card's rewarded ad is in flight (blocks concurrent taps). */
+  adUnlockDisabled?: boolean;
 }
 
 function ThemeCard({
@@ -180,6 +229,9 @@ function ThemeCard({
   textColor,
   textSecondary,
   onPress,
+  onAdUnlock,
+  adUnlockBusy,
+  adUnlockDisabled,
 }: ThemeCardProps) {
   return (
     <TouchableOpacity
@@ -217,6 +269,19 @@ function ThemeCard({
         <Text style={[styles.themeLock, { color: textSecondary }]} numberOfLines={2}>
           🔒 {unlockHint}
         </Text>
+      )}
+      {!unlocked && onAdUnlock && (
+        <TouchableOpacity
+          onPress={onAdUnlock}
+          disabled={adUnlockDisabled}
+          activeOpacity={0.7}
+          style={[styles.adUnlockButton, { borderColor: accent }]}
+          hitSlop={6}
+        >
+          <Text style={[styles.adUnlockText, { color: accent }]}>
+            {adUnlockBusy ? '⏳ Pub en cours…' : '🎬 Pub pour débloquer'}
+          </Text>
+        </TouchableOpacity>
       )}
       {selected && (
         <View style={[styles.selectedBadge, { backgroundColor: accent }]}>
@@ -419,6 +484,19 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     marginTop: 6,
+  },
+  adUnlockButton: {
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  adUnlockText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textAlign: 'center',
   },
   selectedBadge: {
     position: 'absolute',

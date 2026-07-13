@@ -22,6 +22,7 @@ import { TapToStart } from '../components/TapToStart';
 import { UnlockToast } from '../components/UnlockToast';
 import { PauseModal } from '../components/PauseModal';
 import { ThemedBackground } from '../components/ThemedBackground';
+import { RecordIndicator } from '../components/RecordIndicator';
 import {
   GAME,
   findNewlyUnlocked,
@@ -40,10 +41,17 @@ import {
   getTotalBlocks,
   incrementGamesPlayed,
   markUnlocksSeen,
+  recordDailyChallengeScore,
   setHighScoreForMode,
   updateMaxPerfectStreak,
 } from '../utils/storage';
-import { processAchievements, submitGameOverScores } from '../utils/gameCenter';
+import {
+  isGameCenterAvailable,
+  processAchievements,
+  showLeaderboard,
+  submitGameOverScores,
+  LEADERBOARDS,
+} from '../utils/gameCenter';
 import {
   playPlaceSound,
   playPerfectSound,
@@ -55,6 +63,10 @@ interface GameScreenProps {
   onHome: () => void;
   theme: Theme;
   difficulty: Difficulty;
+  /** True when this run is today's Daily Challenge (one attempt, no replay). */
+  isDaily?: boolean;
+  /** Today's challenge label, shown in the in-game HUD chip. */
+  dailyLabel?: string;
 }
 
 interface FallingPieceData extends CutPiece {
@@ -80,7 +92,7 @@ interface PerfectEffectData {
 
 let effectIdCounter = 0;
 
-export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
+export function GameScreen({ onHome, theme, difficulty, isDaily, dailyLabel }: GameScreenProps) {
   const { gameData, startGame, tap, reset, continueGame, pauseLoop, resumeLoop } =
     useGameEngine({ difficulty, theme });
   const [hasContinued, setHasContinued] = useState(false);
@@ -90,6 +102,10 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
   // Game-over context passed to the modal (filled by the post-game async flow).
   const [modeBest, setModeBest] = useState(0);
   const [isNewRecord, setIsNewRecord] = useState(false);
+  // True once the LIVE score passes the pre-game record — drives the in-game
+  // RecordIndicator + the one-shot "👑 RECORD !" popup. Distinct from
+  // isNewRecord, which is only resolved by the post-game persistence flow.
+  const [recordBeaten, setRecordBeaten] = useState(false);
   const [newlyUnlocked, setNewlyUnlocked] = useState<UnlockRule[]>([]);
   // Cumulative-stats snapshot shown in the modal after game over.
   const [cumulativeStats, setCumulativeStats] = useState<{
@@ -131,6 +147,13 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
 
       (async () => {
         try {
+          // Daily challenge: consume today's attempt + store the score first
+          // (cheap local write) so the Home card is correct even if a later
+          // Game Center call hangs.
+          if (isDaily) {
+            await recordDailyChallengeScore(finalScore);
+          }
+
           // Persist stats
           const gamesPlayed = await incrementGamesPlayed();
           const totalBlocks = await addBlocksToTotal(blocksPlaced);
@@ -243,9 +266,28 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
           { ...gameData.lastCutPiece!, id: pieceId, y: blockY },
         ]);
       }
+
+      // Record crossed mid-game — one-shot celebration. modeBest still holds
+      // the PRE-game best here (it's only refreshed at game over / idle), so
+      // comparing the live score against it is exactly what we want.
+      if (!recordBeaten && modeBest > 0 && gameData.score > modeBest) {
+        setRecordBeaten(true);
+        const recordPopupId = ++effectIdCounter;
+        setScorePopups((prev) => [
+          ...prev,
+          {
+            id: recordPopupId,
+            text: '👑 RECORD !',
+            x: GAME.SCREEN_WIDTH / 2,
+            y: blockY - 40,
+            isPerfect: true,
+          },
+        ]);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
     }
     prevScoreRef.current = gameData.score;
-  }, [gameData.score, gameData.state]);
+  }, [gameData.score, gameData.state, modeBest, recordBeaten]);
 
   // Reset displayed mode best whenever a fresh game starts (cleaner UX).
   useEffect(() => {
@@ -263,6 +305,7 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
       setHasContinued(false);
       setNewlyUnlocked([]);
       setIsNewRecord(false);
+      setRecordBeaten(false);
       setCumulativeStats(null);
       return;
     }
@@ -301,6 +344,7 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
       setPerfectEffects([]);
       setNewlyUnlocked([]);
       setIsNewRecord(false);
+      setRecordBeaten(false);
       setCumulativeStats(null);
       reset();
       setStarted(false);
@@ -385,6 +429,27 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
             isPerfect={gameData.isPerfect}
             perfectStreak={gameData.perfectStreak}
           />
+          {/* Daily challenge HUD chip — constant reminder of today's twist. */}
+          {isDaily && (
+            <View style={[styles.dailyChip, { borderColor: theme.accent }]}>
+              <Text style={[styles.dailyChipText, { color: theme.accent }]}>
+                🗓️ DÉFI DU JOUR{dailyLabel ? ` — ${dailyLabel}` : ''}
+              </Text>
+            </View>
+          )}
+          {/* Record ghost line — appears when the player closes in on their
+              mode record (≥70%), flips gold once they pass it. Mounting late
+              keeps the HUD clean for most of the run. */}
+          {gameData.state === 'playing' &&
+            modeBest > 0 &&
+            (recordBeaten ||
+              gameData.score >= Math.max(1, Math.ceil(modeBest * 0.7))) && (
+              <RecordIndicator
+                record={modeBest}
+                beaten={recordBeaten}
+                theme={theme}
+              />
+            )}
         </View>
 
         {/* Pause button — only meaningful during an active game, hidden on
@@ -471,6 +536,14 @@ export function GameScreen({ onHome, theme, difficulty }: GameScreenProps) {
           isNewRecord={isNewRecord}
           difficulty={difficulty}
           theme={theme}
+          isDaily={isDaily}
+          onShowDailyLeaderboard={
+            isDaily && isGameCenterAvailable()
+              ? () => {
+                  showLeaderboard(LEADERBOARDS.DAILY_BEST);
+                }
+              : undefined
+          }
           onRestart={handleRestart}
           onContinue={handleContinue}
           hasContinued={hasContinued}
@@ -510,6 +583,19 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     alignItems: 'center',
+  },
+  dailyChip: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  dailyChipText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
   },
   pauseButton: {
     position: 'absolute',

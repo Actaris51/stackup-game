@@ -21,6 +21,7 @@ import {
   tickDailyStreak,
 } from './src/utils/storage';
 import { initSounds } from './src/utils/sounds';
+import { getDailyChallenge, type DailyChallenge } from './src/utils/dailyChallenge';
 import {
   DEFAULT_DIFFICULTY_ID,
   DEFAULT_THEME_ID,
@@ -40,6 +41,10 @@ export default function App() {
   const [bootstrapped, setBootstrapped] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [dailyStreak, setDailyStreak] = useState(0);
+  // Non-null while the current game screen is a Daily Challenge run.
+  // Computed at launch time (not app start) so it can't go stale across
+  // midnight while the app sits open.
+  const [dailyRun, setDailyRun] = useState<DailyChallenge | null>(null);
 
   // First-mount: migrate legacy data, load preferences, kick off ads + GC auth.
   useEffect(() => {
@@ -135,15 +140,27 @@ export default function App() {
           theme={theme}
           difficulty={difficulty}
           dailyStreak={dailyStreak}
-          onPlay={() => setScreen('game')}
+          onPlay={() => {
+            setDailyRun(null);
+            setScreen('game');
+          }}
+          onPlayDaily={() => {
+            setDailyRun(getDailyChallenge());
+            setScreen('game');
+          }}
           onCustomize={() => setScreen('customize')}
         />
       )}
       {screen === 'game' && (
         <GameScreen
           theme={theme}
-          difficulty={difficulty}
-          onHome={() => setScreen('home')}
+          difficulty={dailyRun ? dailyRun.difficulty : difficulty}
+          isDaily={dailyRun !== null}
+          dailyLabel={dailyRun?.label}
+          onHome={() => {
+            setDailyRun(null);
+            setScreen('home');
+          }}
         />
       )}
       {screen === 'customize' && (
@@ -153,7 +170,10 @@ export default function App() {
           onChangeTheme={handleChangeTheme}
           onChangeDifficulty={handleChangeDifficulty}
           onBack={() => setScreen('home')}
-          onPlay={() => setScreen('game')}
+          onPlay={() => {
+            setDailyRun(null);
+            setScreen('game');
+          }}
         />
       )}
       {showOnboarding && (

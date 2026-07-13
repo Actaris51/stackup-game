@@ -4,7 +4,7 @@
 // Highscores are tracked per mode (see utils/storage.ts and utils/gameCenter.ts).
 // Zen is special: no game over, no leaderboard — purely relaxing infinite stack.
 
-export type DifficultyId = 'chill' | 'classic' | 'hard' | 'insane' | 'zen';
+export type DifficultyId = 'chill' | 'classic' | 'hard' | 'insane' | 'zen' | 'daily';
 
 export interface Difficulty {
   id: DifficultyId;
@@ -98,6 +98,26 @@ export const DIFFICULTIES: Record<DifficultyId, Difficulty> = {
     canGameOver: false,
     description: 'Sans game over. Empile sans pression.',
     descriptionEN: 'No game over. Stack without pressure.',
+  },
+  // Baseline entry for the Daily Challenge. The ACTUAL per-day parameters are
+  // synthesized at runtime by utils/dailyChallenge.ts (date-seeded, always at
+  // least Classic-hard so score achievements can't be farmed on an easy day).
+  // Not listed in DIFFICULTY_ORDER: it's launched from the Home card, never
+  // from the Customize picker. hasLeaderboard=true routes scores to the
+  // recurring STACKUP_DAILY_BEST Game Center leaderboard.
+  daily: {
+    id: 'daily',
+    name: 'Défi du jour',
+    nameEN: 'Daily Challenge',
+    initialSpeedMul: 1.0,
+    maxSpeedMul: 1.0,
+    speedIncrementMul: 1.0,
+    initialBlockWidthMul: 1.0,
+    perfectTolerance: 5,
+    hasLeaderboard: true,
+    canGameOver: true,
+    description: 'Le même défi pour tout le monde. Un seul essai par jour.',
+    descriptionEN: 'Same challenge for everyone. One attempt per day.',
   },
 };
 
