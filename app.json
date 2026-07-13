@@ -318,7 +318,8 @@
       ],
       "expo-tracking-transparency",
       "expo-iap",
-      "./plugins/with-game-center.js"
+      "./plugins/with-game-center.js",
+      "./plugins/without-push-entitlement.js"
     ],
     "owner": "actaris51",
     "runtimeVersion": {
