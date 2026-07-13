@@ -558,6 +558,96 @@ def screenshot_6():
 
 
 # ----------------------------------------------------------------------------
+# Screen 7 — DAILY CHALLENGE (v1.2 headline feature)
+# ----------------------------------------------------------------------------
+def screenshot_7():
+    img = make_background(NAVY, INDIGO)
+    img = add_glow(img, (W // 2, int(H * 0.45)), 650, ACCENT, opacity=85)
+    img = add_glow(img, (int(W * 0.7), int(H * 0.8)), 450, GOLD, opacity=60)
+    draw = ImageDraw.Draw(img)
+
+    draw_header(draw, "DAILY CHALLENGE", "One try a day — same game for everyone")
+
+    # iPhone frame
+    fw = int(W * 0.80)
+    fh = int(fw * 2.0)
+    fx = (W - fw) // 2
+    fy = int(H * 0.235)
+    inner = draw_iphone_frame(img, fx, fy, fw, fh, screen_bg=(26, 26, 46))
+
+    pdraw = ImageDraw.Draw(img)
+    sx, sy, sw, sh = inner
+
+    # In-app title: STACK (white) + UP (accent), centered as one unit
+    title_font = get_font(90, bold=True)
+    l1, _, r1, _ = pdraw.textbbox((0, 0), "STACK", font=title_font)
+    l2, _, r2, _ = pdraw.textbbox((0, 0), "UP", font=title_font)
+    w1, w2 = r1 - l1, r2 - l2
+    tx = sx + (sw - (w1 + w2)) // 2
+    ty = sy + int(sh * 0.06)
+    pdraw.text((tx, ty), "STACK", font=title_font, fill=WHITE)
+    pdraw.text((tx + w1, ty), "UP", font=title_font, fill=ACCENT)
+
+    # Daily challenge card (mirrors the real Home card)
+    card_w = int(sw * 0.86)
+    card_h = int(sh * 0.155)
+    cx = sx + (sw - card_w) // 2
+    cy = sy + int(sh * 0.20)
+    pdraw.rounded_rectangle([cx, cy, cx + card_w, cy + card_h], radius=36,
+                            fill=(28, 28, 50), outline=ACCENT, width=5)
+    card_title_font = get_font(52, bold=True)
+    pdraw.text((cx + 44, cy + 34), "DAILY CHALLENGE", font=card_title_font, fill=WHITE)
+    label_font = get_font(46, bold=True)
+    pdraw.text((cx + 44, cy + 110), "Speed Rush", font=label_font, fill=GOLD)
+    sub_font = get_font(34, bold=False)
+    pdraw.text((cx + 44, cy + 180), "One attempt. Global daily board.",
+               font=sub_font, fill=LAVENDER)
+
+    # PLAY button pill
+    btn_w = int(sw * 0.62)
+    btn_h = int(sh * 0.075)
+    bx = sx + (sw - btn_w) // 2
+    by = cy + card_h + int(sh * 0.045)
+    pdraw.rounded_rectangle([bx, by, bx + btn_w, by + btn_h],
+                            radius=btn_h // 2, fill=ACCENT)
+    btn_font = get_font(54, bold=True)
+    btn_text = "PLAY TODAY'S RUN"
+    l, t, r, b = pdraw.textbbox((0, 0), btn_text, font=btn_font)
+    pdraw.text((bx + (btn_w - (r - l)) // 2, by + (btn_h - (b - t)) // 2 - t),
+               btn_text, font=btn_font, fill=WHITE)
+
+    # "Today's best" mini leaderboard
+    lb_y = by + btn_h + int(sh * 0.05)
+    lb_title_font = get_font(40, bold=True)
+    pdraw.text((sx + 60, lb_y), "TODAY'S BEST", font=lb_title_font,
+               fill=(150, 150, 180))
+    entries = [
+        ("1", "Nova_Blocks", "96", GOLD),
+        ("2", "You", "89", ACCENT),
+        ("3", "StackKing", "84", (205, 127, 50)),
+    ]
+    row_h = int(sh * 0.075)
+    row_x = sx + 50
+    row_w = sw - 100
+    y_cursor = lb_y + 70
+    name_font = get_font(44, bold=True)
+    score_font = get_font(50, bold=True)
+    for rank, name, score, accent in entries:
+        if name == "You":
+            pdraw.rounded_rectangle(
+                [row_x, y_cursor, row_x + row_w, y_cursor + row_h - 12],
+                radius=22, fill=(60, 25, 40), outline=ACCENT, width=3)
+        pdraw.text((row_x + 30, y_cursor + 20), rank, font=name_font, fill=accent)
+        pdraw.text((row_x + 110, y_cursor + 22), name, font=name_font, fill=WHITE)
+        l, t, r, b = pdraw.textbbox((0, 0), score, font=score_font)
+        pdraw.text((row_x + row_w - (r - l) - 30, y_cursor + 14), score,
+                   font=score_font, fill=accent)
+        y_cursor += row_h
+
+    return img
+
+
+# ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
 SCREENSHOTS = [
@@ -567,6 +657,7 @@ SCREENSHOTS = [
     ("screenshot-4-perfect", screenshot_4),
     ("screenshot-5-leaderboards", screenshot_5),
     ("screenshot-6-achievements", screenshot_6),
+    ("screenshot-7-daily", screenshot_7),
 ]
 
 
