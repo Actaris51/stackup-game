@@ -11,7 +11,9 @@ export const AD_CONFIG = {
   INTERSTITIAL_ID: '__WEB__',
   REWARDED_ID: '__WEB__',
   BANNER_ID: '__WEB__',
-  INTERSTITIAL_FREQUENCY: 3,
+  // Keep in sync with ads.ts (softened pacing, 2026-07).
+  INTERSTITIAL_FREQUENCY: 5,
+  INTERSTITIAL_MIN_INTERVAL_MS: 180000,
 };
 
 export async function requestATTPermissionIfNeeded(): Promise<void> {

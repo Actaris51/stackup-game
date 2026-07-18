@@ -105,8 +105,17 @@ export const AD_CONFIG = {
   get BANNER_ID() {
     return activeAdUnitIds().BANNER;
   },
-  INTERSTITIAL_FREQUENCY: 3,
+  // Interstitial pacing (softened 2026-07 on Julien's call: the die→replay
+  // loop is the core fun, so passive ads must stay RARE — the occasional one
+  // also keeps the "Remove Ads" IAP meaningful). Both gates must pass:
+  // every Nth game AND at least MIN_INTERVAL since the last one shown.
+  INTERSTITIAL_FREQUENCY: 5,
+  INTERSTITIAL_MIN_INTERVAL_MS: 180000, // 3 min
 };
+
+// Wall-clock timestamp of the last interstitial that actually OPENED.
+// In-memory on purpose: a fresh app launch resetting the cap is fine.
+let lastInterstitialShownAt = 0;
 
 // On web, ads are not supported — use no-op functions
 const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
@@ -264,6 +273,15 @@ export async function showInterstitial(): Promise<void> {
       return;
     }
   } catch {}
+  // Time cap: never two interstitials within MIN_INTERVAL, regardless of the
+  // games-played cadence — protects fast replay grinders from ad hammering.
+  const sinceLast = Date.now() - lastInterstitialShownAt;
+  if (sinceLast < AD_CONFIG.INTERSTITIAL_MIN_INTERVAL_MS) {
+    console.log(
+      `[Ads] Interstitial skipped (shown ${Math.round(sinceLast / 1000)}s ago, min interval ${AD_CONFIG.INTERSTITIAL_MIN_INTERVAL_MS / 1000}s)`
+    );
+    return;
+  }
   await initializeAds();
 
   return new Promise((resolve) => {
@@ -294,6 +312,9 @@ export async function showInterstitial(): Promise<void> {
     // CLOSED; the watch backstop only prevents a leaked promise.
     const unsubOpened = ad.addAdEventListener(AdEventType.OPENED, () => {
       opened = true;
+      // Stamp the time cap on actual display (not on request), so skipped or
+      // failed loads never delay the next legitimate interstitial.
+      lastInterstitialShownAt = Date.now();
       if (loadTimer) {
         clearTimeout(loadTimer);
         loadTimer = null;
