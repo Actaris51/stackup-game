@@ -93,12 +93,28 @@ interface PerfectEffectData {
 
 let effectIdCounter = 0;
 
+/**
+ * Grace period between hiding the game-over Modal and presenting a
+ * full-screen ad. RN's Modal is a NATIVE iOS window/view-controller; its
+ * dismissal animates (~300ms). Presenting the AdMob view controller while
+ * the Modal is still up — and then tearing both down almost simultaneously
+ * when the ad closes — races UIKit's dismissal and can leave a ghost
+ * window that swallows every touch (v1.2.0 live bug: "TAP TO START shown
+ * but taps do nothing" after the Rejouer interstitial).
+ */
+const MODAL_DISMISS_GRACE_MS = 500;
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export function GameScreen({ onHome, theme, difficulty, isDaily, dailyLabel }: GameScreenProps) {
   const { gameData, startGame, tap, reset, continueGame, pauseLoop, resumeLoop } =
     useGameEngine({ difficulty, theme });
   const [hasContinued, setHasContinued] = useState(false);
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
+  // True while a full-screen ad (interstitial or rewarded) is being shown
+  // from the game-over flow. Hides the native Modal BEFORE the ad presents,
+  // so the two never overlap (see MODAL_DISMISS_GRACE_MS above).
+  const [adInFlight, setAdInFlight] = useState(false);
 
   // Game-over context passed to the modal (filled by the post-game async flow).
   const [modeBest, setModeBest] = useState(0);
@@ -325,19 +341,28 @@ export function GameScreen({ onHome, theme, difficulty, isDaily, dailyLabel }: G
     // forget, which fixed the freeze but let the interstitial pop over the fresh
     // game a second or two later ("une pub arrive en pleine partie") — not OK.
     //
-    // This relies on `showInterstitial()` being bounded: it only time-boxes the
-    // LOAD phase and resolves on the real CLOSED, so it can't freeze the game.
-    // The reset runs in `finally`, so even if the ad errors/throws/never closes
-    // (10s load cap / 30s watch backstop) the player always gets a fresh game.
+    // 🔴 SEQUENCING (v1.2.0 live bug): the game-over Modal must be FULLY
+    // dismissed before the ad presents. Showing the AdMob view controller on
+    // top of the still-open native Modal, then dismissing both when the ad
+    // closed, raced UIKit and could leave a ghost window eating all touches
+    // ("TAP TO START" visible but unresponsive). setAdInFlight(true) hides
+    // the Modal; the grace wait lets its native dismissal finish; only then
+    // does the ad present — from the root view controller.
+    //
+    // `showInterstitial()` stays bounded: load-phase timeout only, resolves on
+    // the real CLOSED. The reset runs in `finally`, so even if the ad
+    // errors/never closes the player always gets a fresh game.
     //
     // Suppress the interstitial right after a rewarded "Continue" so the player
     // never gets two ads back to back. (incrementGamesPlayed + Game Center
     // submission already happened in the game-over useEffect above.)
     const wasContinued = hasContinued;
+    setAdInFlight(true);
     try {
       if (!wasContinued) {
         const gamesPlayed = await getGamesPlayed();
         if (gamesPlayed % AD_CONFIG.INTERSTITIAL_FREQUENCY === 0) {
+          await wait(MODAL_DISMISS_GRACE_MS);
           await showInterstitial();
         }
       }
@@ -354,6 +379,7 @@ export function GameScreen({ onHome, theme, difficulty, isDaily, dailyLabel }: G
       reset();
       setStarted(false);
       setHasContinued(false);
+      setAdInFlight(false);
     }
   }, [reset, hasContinued]);
 
@@ -381,10 +407,21 @@ export function GameScreen({ onHome, theme, difficulty, isDaily, dailyLabel }: G
   }, [reset, onHome]);
 
   const handleContinue = useCallback(async () => {
-    const watched = await showRewarded();
-    if (watched) {
-      setHasContinued(true);
-      continueGame();
+    // Same ghost-window protection as handleRestart: dismiss the native
+    // Modal first, wait out its animation, THEN present the rewarded ad.
+    setAdInFlight(true);
+    try {
+      await wait(MODAL_DISMISS_GRACE_MS);
+      const watched = await showRewarded();
+      if (watched) {
+        setHasContinued(true);
+        continueGame();
+      }
+    } finally {
+      // Reward not earned → state is still 'gameOver', so clearing the flag
+      // re-shows the Modal. Reward earned → state flipped to 'playing' and
+      // the Modal stays hidden either way.
+      setAdInFlight(false);
     }
   }, [continueGame]);
 
@@ -533,9 +570,11 @@ export function GameScreen({ onHome, theme, difficulty, isDaily, dailyLabel }: G
           )}
         </View>
 
-        {/* Game Over */}
+        {/* Game Over. Hidden while a full-screen ad is in flight so the
+            native Modal and the AdMob view controller never overlap (ghost
+            touch-eating window otherwise — see MODAL_DISMISS_GRACE_MS). */}
         <GameOverModal
-          visible={gameData.state === 'gameOver'}
+          visible={gameData.state === 'gameOver' && !adInFlight}
           score={gameData.score}
           modeBest={modeBest}
           isNewRecord={isNewRecord}
